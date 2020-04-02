@@ -1,7 +1,12 @@
-#![deny(warnings)]
+// #![deny(warnings)]
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::fs;
+
+use toml;
+
+use serde_derive::Deserialize;
 
 use futures_util::future::try_join;
 
@@ -13,15 +18,16 @@ use tokio::net::TcpStream;
 
 type HttpClient = Client<hyper::client::HttpConnector>;
 
-// To try this example:
-// 1. cargo run --example http_proxy
-// 2. config http_proxy in command line
-//    $ export http_proxy=http://127.0.0.1:8100
-//    $ export https_proxy=http://127.0.0.1:8100
-// 3. send requests
-//    $ curl -i https://www.some_domain.com/
+const CONFIG_FILE_NAME: &str = "proxy_config.toml";
+
 #[tokio::main]
 async fn main() {
+    load_proxy_config();
+
+    // @TODO init db?
+    // https://github.com/TheNeikos/rustbreak
+    // https://github.com/spacejam/sled
+
     let addr = SocketAddr::from(([127, 0, 0, 1], 8100));
     let client = HttpClient::new();
 
@@ -39,8 +45,40 @@ async fn main() {
     }
 }
 
-async fn proxy(client: HttpClient, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+#[derive(Debug, Deserialize)]
+struct Route {
+    from: String,
+    to: String,
+    validate: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProxyConfig {
+    refresh_config_url_path: String,
+    cache_file_path: String,
+    routes: Vec<Route>,
+}
+
+fn load_proxy_config() {
+    // @TODO load to one-cell unsync lazy
+    let config = fs::read_to_string(CONFIG_FILE_NAME).expect("read proxy config");
+    let config: ProxyConfig = toml::from_str(&config).expect("parse proxy config");
+    dbg!(config);
+}
+
+fn route(uri: &mut http::Uri) {
+    *uri = "http://localhost:8000/".parse().unwrap();
+}
+
+fn map_request(mut req: Request<Body>) -> Request<Body> {
+    route(req.uri_mut());
+    req
+}
+
+async fn proxy(client: HttpClient, mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     println!("req: {:?}", req);
+
+    req = map_request(req);
 
     if Method::CONNECT == req.method() {
         // Received an HTTP request like:
