@@ -14,64 +14,11 @@ use tokio::task;
 
 mod proxy;
 
-use proxy::ProxyConfig;
-
-type HttpClient = Client<hyper::client::HttpConnector>;
-
-macro_rules! shadow_clone {
-    ($ ($to_clone:ident) ,*) => {
-        $(
-            #[allow(unused_mut)]
-            let mut $to_clone = $to_clone.clone();
-        )*
-    };
-}
+use proxy::{Proxy, ProxyConfig, HttpClient};
 
 #[tokio::main]
 async fn main() {
-    // @TODO init db?
-    // https://github.com/TheNeikos/rustbreak
-    // https://github.com/spacejam/sled
-
-    let proxy_config = ProxyConfig::load().await;
-    let addr = proxy_config.socket_address.clone();
-
-    let (config_refresh_sender, mut config_refresh_receiver) = mpsc::unbounded_channel();
-    let (config_sender, config_receiver) = watch::channel(proxy_config);
-
-    task::spawn(async move {
-        while let Some(_) = config_refresh_receiver.recv().await {
-            config_sender.broadcast(ProxyConfig::load().await).expect("broadcast proxy config")
-        }
-    });
-
-    let service = service_fn(move |req: Request<Body>| {
-        shadow_clone!(config_receiver, config_refresh_sender);
-        async move {
-            proxy(
-                req,
-                HttpClient::new(),
-                config_receiver.recv().await.expect("receive proxy config"),
-                move || {
-                    config_refresh_sender.clone().send(()).expect("schedule proxy config refresh");
-                }
-            ).await
-        }
-    });
-
-    let make_service = make_service_fn(move |_| {
-        shadow_clone!(service);
-        async move {
-            Ok::<_, Infallible>(service)
-        }
-    });
-
-    let server = Server::bind(&addr).serve(make_service);
-    println!("Listening on http://{}", addr);
-
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
+    Proxy::start(proxy_request).await
 }
 
 fn route(uri: &mut http::Uri) {
@@ -83,7 +30,7 @@ fn map_request(mut req: Request<Body>) -> Request<Body> {
     req
 }
 
-async fn proxy(
+async fn proxy_request(
     mut req: Request<Body>,
     client: HttpClient,
     proxy_config: ProxyConfig,
@@ -92,7 +39,7 @@ async fn proxy(
     schedule_config_refresh();
 
     println!("req: {:#?}", req);
-    println!("proxy_config: {:#?}", proxy_config);
+    // println!("proxy_config: {:#?}", proxy_config);
 
     req = map_request(req);
 
