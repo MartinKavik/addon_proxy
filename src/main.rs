@@ -1,12 +1,5 @@
-// #![deny(warnings)]
-
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::fs;
-
-use toml;
-
-use serde_derive::Deserialize;
 
 use futures_util::future::try_join;
 
@@ -19,9 +12,11 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task;
 
-type HttpClient = Client<hyper::client::HttpConnector>;
+mod proxy;
 
-const CONFIG_FILE_NAME: &str = "proxy_config.toml";
+use proxy::ProxyConfig;
+
+type HttpClient = Client<hyper::client::HttpConnector>;
 
 macro_rules! shadow_clone {
     ($ ($to_clone:ident) ,*) => {
@@ -38,7 +33,7 @@ async fn main() {
     // https://github.com/TheNeikos/rustbreak
     // https://github.com/spacejam/sled
 
-    let proxy_config = load_proxy_config();
+    let proxy_config = ProxyConfig::load().await;
     let addr = proxy_config.socket_address.clone();
 
     let (config_refresh_sender, mut config_refresh_receiver) = mpsc::unbounded_channel();
@@ -46,7 +41,7 @@ async fn main() {
 
     task::spawn(async move {
         while let Some(_) = config_refresh_receiver.recv().await {
-            config_sender.broadcast(load_proxy_config()).expect("broadcast proxy config")
+            config_sender.broadcast(ProxyConfig::load().await).expect("broadcast proxy config")
         }
     });
 
@@ -77,26 +72,6 @@ async fn main() {
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
     }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct Route {
-    from: String,
-    to: String,
-    validate: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct ProxyConfig {
-    refresh_config_url_path: String,
-    cache_file_path: String,
-    socket_address: SocketAddr,
-    routes: Vec<Route>,
-}
-
-fn load_proxy_config() -> ProxyConfig {
-    let config = fs::read_to_string(CONFIG_FILE_NAME).expect("read proxy config");
-    toml::from_str(&config).expect("parse proxy config")
 }
 
 fn route(uri: &mut http::Uri) {
