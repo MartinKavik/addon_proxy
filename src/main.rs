@@ -15,29 +15,63 @@ use hyper::upgrade::Upgraded;
 use hyper::{Body, Client, Method, Request, Response, Server};
 
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
+use tokio::task;
 
 type HttpClient = Client<hyper::client::HttpConnector>;
 
 const CONFIG_FILE_NAME: &str = "proxy_config.toml";
 
+macro_rules! shadow_clone {
+    ($ ($to_clone:ident) ,*) => {
+        $(
+            #[allow(unused_mut)]
+            let mut $to_clone = $to_clone.clone();
+        )*
+    };
+}
+
 #[tokio::main]
 async fn main() {
-    load_proxy_config();
-
     // @TODO init db?
     // https://github.com/TheNeikos/rustbreak
     // https://github.com/spacejam/sled
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8100));
-    let client = HttpClient::new();
+    let proxy_config = load_proxy_config();
+    let addr = proxy_config.socket_address.clone();
+
+    let (config_refresh_sender, mut config_refresh_receiver) = mpsc::unbounded_channel();
+    let (config_sender, config_receiver) = watch::channel(proxy_config);
+
+    task::spawn(async move {
+        while let Some(_) = config_refresh_receiver.recv().await {
+            config_sender.broadcast(load_proxy_config()).expect("broadcast proxy config")
+        }
+    });
+
+    let service = service_fn(move |req: Request<Body>| {
+        shadow_clone!(config_receiver, config_refresh_sender);
+        async move {
+            proxy(
+                req,
+                HttpClient::new(),
+                config_receiver.recv().await.expect("receive proxy config"),
+                move || {
+                    config_refresh_sender.clone().send(()).expect("schedule proxy config refresh");
+                }
+            ).await
+        }
+    });
 
     let make_service = make_service_fn(move |_| {
-        let client = client.clone();
-        async move { Ok::<_, Infallible>(service_fn(move |req| proxy(client.clone(), req))) }
+        shadow_clone!(service);
+        async move {
+            Ok::<_, Infallible>(service)
+        }
     });
 
     let server = Server::bind(&addr).serve(make_service);
-
     println!("Listening on http://{}", addr);
 
     if let Err(e) = server.await {
@@ -45,25 +79,24 @@ async fn main() {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct Route {
     from: String,
     to: String,
     validate: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ProxyConfig {
     refresh_config_url_path: String,
     cache_file_path: String,
+    socket_address: SocketAddr,
     routes: Vec<Route>,
 }
 
-fn load_proxy_config() {
-    // @TODO load to one-cell unsync lazy
+fn load_proxy_config() -> ProxyConfig {
     let config = fs::read_to_string(CONFIG_FILE_NAME).expect("read proxy config");
-    let config: ProxyConfig = toml::from_str(&config).expect("parse proxy config");
-    dbg!(config);
+    toml::from_str(&config).expect("parse proxy config")
 }
 
 fn route(uri: &mut http::Uri) {
@@ -75,8 +108,16 @@ fn map_request(mut req: Request<Body>) -> Request<Body> {
     req
 }
 
-async fn proxy(client: HttpClient, mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    println!("req: {:?}", req);
+async fn proxy(
+    mut req: Request<Body>,
+    client: HttpClient,
+    proxy_config: ProxyConfig,
+    schedule_config_refresh: impl Fn(),
+) -> Result<Response<Body>, hyper::Error> {
+    schedule_config_refresh();
+
+    println!("req: {:#?}", req);
+    println!("proxy_config: {:#?}", proxy_config);
 
     req = map_request(req);
 
@@ -95,7 +136,7 @@ async fn proxy(client: HttpClient, mut req: Request<Body>) -> Result<Response<Bo
         // connection be upgraded, so we can't return a response inside
         // `on_upgrade` future.
         if let Some(addr) = host_addr(req.uri()) {
-            tokio::task::spawn(async move {
+            task::spawn(async move {
                 match req.into_body().on_upgrade().await {
                     Ok(upgraded) => {
                         if let Err(e) = tunnel(upgraded, addr).await {

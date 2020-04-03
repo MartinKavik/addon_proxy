@@ -1,5 +1,6 @@
 refresh_config_url_path = "/refresh-config"
 cache_file_path = "proxy_cache"
+socket_address = "127.0.0.1:8100"
 
 # the first match
 
