@@ -1,8 +1,14 @@
-refresh_config_url_path = "/refresh-config"
+reload_config_url_path = "/reload-proxy-config"
 cache_file_path = "proxy_cache"
 socket_address = "127.0.0.1:8100"
 
 # the first match
+
+# ---TESTING---
+[[routes]]
+from = "example.com/xxx"
+to = "http://localhost:8000"
+## ---/---
 
 [[routes]]
 from = "sub.domain.com/my-addon"
@@ -21,9 +27,4 @@ to = "http://localhost:8080"
 from = "dont-validate.com"
 to = "http://localhost:8080"
 validate = false   # Note: allow /manifest.json ; bad_request on fail
-
-[[routes]]
-from = "*"
-to = "http://localhost:8000"
-validate = false
 
