@@ -15,8 +15,6 @@ mod config;
 
 pub use config::{ProxyConfig, ProxyRoute};
 
-pub type HttpClient = Client<hyper::client::HttpConnector>;
-
 macro_rules! shadow_clone {
     ($ ($to_clone:ident) ,*) => {
         $(
@@ -28,18 +26,27 @@ macro_rules! shadow_clone {
 
 // ------ Proxy ------
 
-pub struct Proxy;
+pub struct Proxy<C, B> {
+    client: Arc<Client<C, B>>
+}
 
-impl Proxy {
-    pub async fn start<PR, PRO>(proxy_request: PR)
+impl<C: Send + Sync + 'static, B: Send + 'static> Proxy<C, B> {
+    pub fn new(client: Client<C, B>) -> Self {
+        Self {
+            client: Arc::new(client)
+        }
+    }
+
+    pub async fn start<PR, PRO>(&self, proxy_request: PR)
         where
             PRO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
-            PR: Fn(Request<Body>, HttpClient, Arc<ProxyConfig>, Box<dyn Fn() + Send>) -> PRO + Send + Sync + Copy + 'static
+            PR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, Box<dyn Fn() + Send>) -> PRO + Send + Sync + Copy + 'static
     {
         // @TODO init db?
         // https://github.com/TheNeikos/rustbreak
         // https://github.com/spacejam/sled
 
+        let client = Arc::clone(&self.client);
         let proxy_config = ProxyConfig::load().await.expect("load proxy config");
         let addr = proxy_config.socket_address.clone();
 
@@ -59,11 +66,11 @@ impl Proxy {
         });
 
         let service = service_fn(move |req: Request<Body>| {
-            shadow_clone!(config_receiver, config_reload_sender);
+            shadow_clone!(config_receiver, config_reload_sender, client);
             async move {
                 proxy_request(
                     req,
-                    HttpClient::new(),
+                    client,
                     config_receiver.recv().await.expect("receive proxy config"),
                     Box::new(move || {
                         config_reload_sender.clone().send(()).expect("schedule proxy config reload");
