@@ -1,14 +1,13 @@
+# -- Proxy config --
+# See documentation for struct `ProxyConfig`.
+
 reload_config_url_path = "/reload-proxy-config"
 cache_file_path = "proxy_cache"
 socket_address = "127.0.0.1:8100"
 
-# the first match
-
-# ---TESTING---
 [[routes]]
 from = "example.com/xxx"
 to = "http://localhost:8000"
-## ---/---
 
 [[routes]]
 from = "sub.domain.com/my-addon"
