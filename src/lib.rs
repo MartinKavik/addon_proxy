@@ -1,48 +1,12 @@
-use std::convert::Infallible;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
-use futures_util::future::try_join;
-
-use hyper::service::{make_service_fn, service_fn};
-use hyper::upgrade::Upgraded;
-use hyper::{Body, Client, Method, Request, Response, Server};
+use hyper::{Body, Client, Request, Response};
 use hyper::client::HttpConnector;
 
-use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio::sync::watch;
-use tokio::task;
-
 pub mod proxy;
-use proxy::{Proxy, ProxyConfig};
+use proxy::ProxyConfig;
 
-/// `proxy_request` is invoked for each request.
-/// It allows you to modify or validate original request.
-/// You can return `Response` from the proxied endpoint, e.g.:
-/// ```rust,no_run
-/// client.request(req).await
-/// ```
-/// or you can return a custom `Response`, e.g.:
-/// ```rust,no_run
-/// Ok(Response::new(Body::from("Proxy config reload scheduled.")))
-/// ```
-///
-/// # Parameters
-///
-/// - `req: Request<Body>` - The original request.
-///
-/// - `client: Arc<Client<HttpConnector>>` - The client set in `Proxy` instance.
-///    `Client` type parameters can be changed to support, for instance, TLS.
-///
-/// - `proxy_config: Arc<ProxyConfig>` - A configuration loaded from `proxy_config.toml`.
-///
-/// - `schedule_config_reload: impl Fn()` - The configuration will be reloaded and passed
-///    to new requests after `schedule_config_reload` call.
-///
-/// # Errors
-/// Returns `hyper::Error` when request fails.
-pub async fn proxy_request(
+pub async fn on_request(
     req: Request<Body>,
     client: Arc<Client<HttpConnector>>,
     proxy_config: Arc<ProxyConfig>,
