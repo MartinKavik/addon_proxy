@@ -6,6 +6,7 @@ use tokio::fs;
 
 // ------ ProxyConfig ------
 
+/// Proxy configuration loaded from the TOML file.
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyConfig {
     /// Send a request with this url path to schedule reload of this configuration
@@ -37,7 +38,7 @@ pub struct ProxyConfig {
     /// ```
     pub socket_address: SocketAddr,
 
-    /// Routes for proxy router.
+    /// Routes for the proxy router.
     ///
     /// # Example (TOML)
     ///
@@ -55,6 +56,7 @@ pub struct ProxyConfig {
 }
 
 impl ProxyConfig {
+    /// Read configuration from the TOML file and try to parse it into `ProxyConfig`.
     pub async fn load(path: impl AsRef<Path>) -> Result<ProxyConfig, String> {
         let config = fs::read_to_string(path).await.map_err(|err| err.to_string())?;
         toml::from_str(&config).map_err(|err| err.to_string())
@@ -63,6 +65,20 @@ impl ProxyConfig {
 
 // ------ ProxyRoute ------
 
+/// Route for the proxy router.
+///
+/// # Example (TOML)
+///
+/// ```toml
+/// [[routes]]
+/// from = "sub.domain.com"
+/// to = "http://localhost:8080"
+///
+/// [[routes]]
+/// from = "dont-validate.com"
+/// to = "http://localhost:8080"
+/// validate = false
+/// ```
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyRoute {
     pub from: String,

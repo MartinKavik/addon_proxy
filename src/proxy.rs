@@ -15,7 +15,7 @@ mod config;
 
 pub use config::{ProxyConfig, ProxyRoute};
 
-const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
+pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
 
 macro_rules! shadow_clone {
     ($ ($to_clone:ident) ,*) => {
@@ -28,9 +28,25 @@ macro_rules! shadow_clone {
 
 // ------ Proxy ------
 
-/// See documentation for `Proxy` field `schedule_config_reload`.
+/// See documentation for `Proxy` field `on_request`.
 pub type ScheduleConfigReload = Arc<dyn Fn() + Send + Sync>;
 
+/// Represents a proxy server.
+///
+/// See field documentation for more details.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use ::addon_proxy::{proxy::Proxy, on_request};
+/// use hyper::Client;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     Proxy::new(Client::new(), on_request).start().await
+/// }
+/// ```
+///
 /// # Type parameters
 ///
 /// - `C` = client connector
@@ -38,11 +54,18 @@ pub type ScheduleConfigReload = Arc<dyn Fn() + Send + Sync>;
 /// - `OR` = `on_request` function
 /// - `ORO` = `on_request` output (aka return value)
 pub struct Proxy<C, B, OR, ORO> {
+    /// Where the TOML file with settings is located.
     pub config_path: PathBuf,
+
+    /// The client that is passed to all `on_request` calls.
+    ///
+    /// _Note:_ To support also TLS and use other connectors, see
+    /// [hyper.rs Client configuration](https://hyper.rs/guides/client/configuration/).
     pub client: Arc<Client<C, B>>,
 
     /// `on_request` is invoked for each request.
-    /// It allows you to modify or validate original request.
+    /// It allows you to modify or validate the original request.
+    ///
     /// You can return `Response` from the proxied endpoint, e.g.:
     /// ```rust,no_run
     /// client.request(req).await
@@ -150,7 +173,7 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         self
     }
 
-    /// Starts `Proxy` server.
+    /// Start the `Proxy` server.
     ///
     /// # Example
     ///
@@ -163,10 +186,17 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
     ///     Proxy::new(Client::new(), on_request).start().await
     /// }
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// - Almost immediately after the `start` call if the proxy config loading failed
+    /// (e.g. TOML file with the configuration cannot be found).
+    /// - While the server is running and it's not possible to send items through a channel
+    /// (this shouldn't happen in practice).
     pub async fn start(&self) {
-        // @TODO init db
-        // https://github.com/TheNeikos/rustbreak
-        // https://github.com/spacejam/sled
+        // @TODO DB
+        // https://github.com/TheNeikos/rustbreak (?)
+        // https://github.com/spacejam/sled (?)
 
         let on_request = self.on_request;
         let client = Arc::clone(&self.client);
@@ -174,9 +204,15 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
         let addr = proxy_config.socket_address.clone();
 
+        // `config_reload_sender` will be used to schedule proxy config reload from `on_request` callbacks.
+        // `config_reload_receiver` will be used in the standalone task to listen for `schedule_config_reload` calls.
         let (config_reload_sender, mut config_reload_receiver) = mpsc::unbounded_channel();
+        // `config_sender` will be used to send a (re)loaded config to the request service.
+        // `config_receiver` will be used to accept the sent config.
         let (config_sender, config_receiver) = watch::channel(Arc::new(proxy_config));
 
+        // Spawn a new task that broadcasts (re)loaded configs.
+        // These configs are picked just before the `on_request` callback is called.
         task::spawn(async move {
             while let Some(_) = config_reload_receiver.recv().await {
                 match ProxyConfig::load(&config_path).await {
@@ -189,10 +225,13 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
             }
         });
 
+        // `schedule_config_reload` will be passed to all `on_request` callbacks.
         let schedule_config_reload = Arc::new(move || {
             config_reload_sender.clone().send(()).expect("schedule proxy config reload");
         });
 
+        // The request service. It's usually bound to a single connection.
+        // The callback will be executed for each request.
         let service = service_fn(move |req: Request<Body>| {
             shadow_clone!(config_receiver, client, schedule_config_reload);
             async move {
@@ -205,6 +244,9 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
             }
         });
 
+        // Since a request service is bound to a single connection,
+        // a server needs a way to make them as it accepts connections.
+        // This is what a `make_service_fn` does.
         let make_service = make_service_fn(move |_| {
             shadow_clone!(service);
             async move {
