@@ -10,7 +10,7 @@ pub async fn on_request(
     req: Request<Body>,
     client: Arc<Client<HttpConnector>>,
     proxy_config: Arc<ProxyConfig>,
-    schedule_config_reload: impl Fn(),
+    schedule_config_reload: Arc<dyn Fn() + Send + Sync>,
 ) -> Result<Response<Body>, hyper::Error> {
     println!("proxy config: {:#?}", proxy_config);
     println!("original req: {:#?}", req);
@@ -25,14 +25,14 @@ pub async fn on_request(
 }
 
 /// Aka "middleware pipeline".
-fn try_map_request(mut req: Request<Body>, proxy_config: &ProxyConfig, schedule_config_reload: impl Fn()) -> Result<Request<Body>, Response<Body>> {
+fn try_map_request(mut req: Request<Body>, proxy_config: &ProxyConfig, schedule_config_reload: Arc<dyn Fn() + Send + Sync>) -> Result<Request<Body>, Response<Body>> {
     req = handle_config_reload(req, proxy_config, schedule_config_reload)?;
     req = handle_routes(req, proxy_config)?;
     Ok(req)
 }
 
 /// Schedule proxy config reload and return simple 200 response when the predefined URL path is matched.
-fn handle_config_reload(req: Request<Body>, proxy_config: &ProxyConfig, schedule_config_reload: impl Fn()) -> Result<Request<Body>, Response<Body>> {
+fn handle_config_reload(req: Request<Body>, proxy_config: &ProxyConfig, schedule_config_reload: Arc<dyn Fn() + Send + Sync>) -> Result<Request<Body>, Response<Body>> {
     if req.uri().path() == proxy_config.reload_config_url_path {
         schedule_config_reload();
         return Err(Response::new(Body::from("Proxy config reload scheduled.")))

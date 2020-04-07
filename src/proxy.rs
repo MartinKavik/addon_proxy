@@ -83,7 +83,7 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         C: Send + Sync + 'static,
         B: Send + 'static,
         ORO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
-        OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, Box<dyn Fn() + Send>) -> ORO + Send + Sync + Copy + 'static,
+        OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, Arc<dyn Fn() + Send + Sync>) -> ORO + Send + Sync + Copy + 'static,
 {
     pub fn new(client: Client<C, B>, on_request: OR) -> Self {
         Self {
@@ -118,16 +118,18 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
             }
         });
 
+        let schedule_config_reload = Arc::new(move || {
+            config_reload_sender.clone().send(()).expect("schedule proxy config reload");
+        });
+
         let service = service_fn(move |req: Request<Body>| {
-            shadow_clone!(config_receiver, config_reload_sender, client);
+            shadow_clone!(config_receiver, client, schedule_config_reload);
             async move {
                 on_request(
                     req,
                     client,
                     config_receiver.recv().await.expect("receive proxy config"),
-                    Box::new(move || {
-                        config_reload_sender.clone().send(()).expect("schedule proxy config reload");
-                    })
+                    schedule_config_reload,
                 ).await
             }
         });
