@@ -3,6 +3,7 @@ use std::path::Path;
 use serde_derive::Deserialize;
 use toml;
 use tokio::fs;
+use http::Uri;
 
 // ------ ProxyConfig ------
 
@@ -82,7 +83,8 @@ impl ProxyConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyRoute {
     pub from: String,
-    pub to: String,
+    #[serde(with = "http_serde::uri")]
+    pub to: Uri,
     pub validate: Option<bool>,
 }
 

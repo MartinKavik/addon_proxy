@@ -6,6 +6,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "http",
+ "http-serde",
  "hyper",
  "serde",
  "serde_derive",
@@ -151,6 +152,16 @@ checksum = "13d5ff830006f7646652e057693569bfe0d51760c0085a071769d142a205111b"
 dependencies = [
  "bytes",
  "http",
+]
+
+[[package]]
+name = "http-serde"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaa9564ce1decf49edcbd2b8f4f732843b4df64eabb8dcfcf0085ff34dbc76a2"
+dependencies = [
+ "http",
+ "serde",
 ]
 
 [[package]]
@@ -359,6 +370,9 @@ name = "serde"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e707fbbf255b8fc8c3b99abb91e7257a622caeb20a9818cbadbeeede4e0932ff"
+dependencies = [
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_derive"

@@ -17,6 +17,17 @@ pub use config::{ProxyConfig, ProxyRoute};
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
 
+/// ```rust,no_run
+/// shadow_clone!(a, b);
+/// ```
+/// generates:
+///
+/// ```rust,no_run
+/// #[allow(unused_mut)]
+/// let mut a = a.clone();
+/// #[allow(unused_mut)]
+/// let mut b = b.clone();
+/// ```
 macro_rules! shadow_clone {
     ($ ($to_clone:ident) ,*) => {
         $(
