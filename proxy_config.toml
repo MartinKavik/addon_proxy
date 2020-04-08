@@ -6,7 +6,7 @@ cache_file_path = "proxy_cache"
 socket_address = "127.0.0.1:8100"
 
 [[routes]]
-from = "example.com/xxx"
+from = "example.com"
 to = "http://localhost:8000"
 
 [[routes]]
