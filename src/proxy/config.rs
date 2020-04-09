@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use serde_derive::Deserialize;
 use toml;
 use tokio::fs;
@@ -21,14 +21,16 @@ pub struct ProxyConfig {
     /// ```
     pub reload_config_url_path: String,
 
-    /// Where the cached responses should be saved.
+    /// The directory where the cached responses and other proxy data should be saved.
+    ///
+    /// _Note:_ The directory will be created if does not exists.
     ///
     /// # Example (TOML)
     ///
     /// ```toml
-    /// cache_file_path = "proxy_cache"
+    /// db_directory = "proxy_db"
     /// ```
-    pub cache_file_path: String,
+    pub db_directory: PathBuf,
 
     /// The address of the new proxy server.
     ///

@@ -11,6 +11,8 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task;
 
+use sled;
+
 mod config;
 
 pub use config::{ProxyConfig, ProxyRoute};
@@ -200,20 +202,18 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
     ///
     /// # Panics
     ///
-    /// - Almost immediately after the `start` call if the proxy config loading failed
-    /// (e.g. TOML file with the configuration cannot be found).
+    /// - Almost immediately after the `start` call
+    ///    - If the proxy config loading failed (e.g. TOML file with the configuration cannot be found).
+    ///    - If the database opening failed (e.g. the storage directory cannot be created).
     /// - While the server is running and it's not possible to send items through a channel
     /// (this shouldn't happen in practice).
     pub async fn start(&self) {
-        // @TODO DB
-        // https://github.com/TheNeikos/rustbreak (?)
-        // https://github.com/spacejam/sled (?)
-
         let on_request = self.on_request;
         let client = Arc::clone(&self.client);
         let config_path = self.config_path.clone();
         let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
         let addr = proxy_config.socket_address.clone();
+        let db = sled::open(&proxy_config.db_directory).expect("open database");
 
         // `config_reload_sender` will be used to schedule proxy config reload from `on_request` callbacks.
         // `config_reload_receiver` will be used in the standalone task to listen for `schedule_config_reload` calls.
@@ -269,6 +269,9 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         println!("Listening on http://{}", addr);
 
         if let Err(e) = server.await {
+            if db.flush_async().await.is_err() {
+                eprintln!("database flush error: {}", e);
+            }
             eprintln!("server error: {}", e);
         }
     }

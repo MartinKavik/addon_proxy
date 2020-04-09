@@ -2,7 +2,7 @@
 # See documentation for struct `ProxyConfig`.
 
 reload_config_url_path = "/reload-proxy-config"
-cache_file_path = "proxy_cache"
+db_directory = "proxy_db"
 socket_address = "127.0.0.1:8100"
 
 [[routes]]
