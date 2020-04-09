@@ -43,6 +43,7 @@ macro_rules! shadow_clone {
 
 /// See documentation for `Proxy` field `on_request`.
 pub type ScheduleConfigReload = Arc<dyn Fn() + Send + Sync>;
+pub type Db = sled::Db;
 
 /// Represents a proxy server.
 ///
@@ -99,22 +100,25 @@ pub struct Proxy<C, B, OR, ORO> {
     /// - `schedule_config_reload` - The configuration will be reloaded and passed
     ///    to new requests after the call.
     ///
+    /// - `db` - Persistent storage to support features like caching.
+    ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use std::sync::Arc;
     /// use hyper::{Body, Client, Request, Response};
     /// use hyper::client::HttpConnector;
-    /// use proxy::{ProxyConfig, ScheduleConfigReload};
+    /// use proxy::{ProxyConfig, ScheduleConfigReload, Db};
     ///
     /// pub async fn on_request(
     ///     req: Request<Body>,
     ///     client: Arc<Client<HttpConnector>>,
     ///     proxy_config: Arc<ProxyConfig>,
     ///     schedule_config_reload: ScheduleConfigReload,
+    ///     db: Db,
     /// ) -> Result<Response<Body>, hyper::Error> {
     ///     println!("original req: {:#?}", req);
-    ///     let req = try_map_request(req, &proxy_config, schedule_config_reload);
+    ///     let req = try_map_request(req, &proxy_config, schedule_config_reload, &db);
     ///     println!("mapped req or response: {:#?}", req);
     ///     match req {
     ///         Ok(req) => client.request(req).await,
@@ -135,7 +139,7 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         C: Send + Sync + 'static,
         B: Send + 'static,
         ORO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
-        OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, ScheduleConfigReload) -> ORO + Send + Sync + Copy + 'static,
+        OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, ScheduleConfigReload, Db) -> ORO + Send + Sync + Copy + 'static,
 {
     /// Create a new `Proxy` instance.
     ///
@@ -213,6 +217,8 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         let config_path = self.config_path.clone();
         let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
         let addr = proxy_config.socket_address.clone();
+        // All operations in sled are thread-safe.
+        // The Db may be cloned and shared across threads without needing to use Arc or Mutex etc…
         let db = sled::open(&proxy_config.db_directory).expect("open database");
 
         // `config_reload_sender` will be used to schedule proxy config reload from `on_request` callbacks.
@@ -243,15 +249,19 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
 
         // The request service. It's usually bound to a single connection.
         // The callback will be executed for each request.
-        let service = service_fn(move |req: Request<Body>| {
-            shadow_clone!(config_receiver, client, schedule_config_reload);
-            async move {
-                on_request(
-                    req,
-                    client,
-                    config_receiver.recv().await.expect("receive proxy config"),
-                    schedule_config_reload,
-                ).await
+        let service = service_fn({
+            shadow_clone!(db);
+            move |req: Request<Body>| {
+                shadow_clone!(config_receiver, client, schedule_config_reload, db);
+                async move {
+                    on_request(
+                        req,
+                        client,
+                        config_receiver.recv().await.expect("receive proxy config"),
+                        schedule_config_reload,
+                        db,
+                    ).await
+                }
             }
         });
 

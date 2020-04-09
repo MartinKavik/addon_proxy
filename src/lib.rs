@@ -1,11 +1,37 @@
 use std::sync::Arc;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use hyper::{Body, Client, Request, Response};
 use hyper::client::HttpConnector;
-use http::StatusCode;
+
+use http::{StatusCode, Method, Uri};
 
 pub mod proxy;
-use proxy::{ProxyConfig, ScheduleConfigReload};
+use proxy::{ProxyConfig, ScheduleConfigReload, Db};
+
+// ------ CacheKey ------
+
+#[derive(Hash)]
+struct CacheKey<'a> {
+    method: &'a Method,
+    uri: &'a Uri
+}
+
+impl<'a> CacheKey<'a> {
+    /// Convert to Sled DB compatible keys.
+    ///
+    /// _Notes:_
+    ///   - Sled DB supports only `AsRef<u8>` as the keys and values.
+    ///   - Big-endian is recommended by Sled DB docs.
+    fn to_db_key(&self) -> [u8; 8] {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish().to_be_bytes()
+    }
+}
+
+// ------ on_request ------
 
 /// See documentation for struct `Proxy` fields.
 pub async fn on_request(
@@ -13,28 +39,40 @@ pub async fn on_request(
     client: Arc<Client<HttpConnector>>,
     proxy_config: Arc<ProxyConfig>,
     schedule_config_reload: ScheduleConfigReload,
+    db: Db,
 ) -> Result<Response<Body>, hyper::Error> {
     // println!("proxy config: {:#?}", proxy_config);
     println!("original req: {:#?}", req);
 
-    let req = try_map_request(req, &proxy_config, schedule_config_reload);
+    let req = try_map_request(req, &proxy_config, schedule_config_reload, &db);
     println!("mapped req or response: {:#?}", req);
 
     match req {
+        // @TODO serialize and cache the response.
         Ok(req) => client.request(req).await,
         Err(response) => Ok(response)
     }
 }
 
 /// Aka "middleware pipeline".
-fn try_map_request(mut req: Request<Body>, proxy_config: &ProxyConfig, schedule_config_reload: ScheduleConfigReload) -> Result<Request<Body>, Response<Body>> {
+fn try_map_request(
+    mut req: Request<Body>,
+    proxy_config: &ProxyConfig,
+    schedule_config_reload: ScheduleConfigReload,
+    db: &Db,
+) -> Result<Request<Body>, Response<Body>> {
     req = handle_config_reload(req, proxy_config, schedule_config_reload)?;
     req = handle_routes(req, proxy_config)?;
+    req = handle_cache(req, proxy_config, db)?;
     Ok(req)
 }
 
 /// Schedule proxy config reload and return simple 200 response when the predefined URL path is matched.
-fn handle_config_reload(req: Request<Body>, proxy_config: &ProxyConfig, schedule_config_reload: ScheduleConfigReload) -> Result<Request<Body>, Response<Body>> {
+fn handle_config_reload(
+    req: Request<Body>,
+    proxy_config: &ProxyConfig,
+    schedule_config_reload: ScheduleConfigReload
+) -> Result<Request<Body>, Response<Body>> {
     if req.uri().path() == proxy_config.reload_config_url_path {
         schedule_config_reload();
         return Err(Response::new(Body::from("Proxy config reload scheduled.")))
@@ -68,7 +106,18 @@ fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<R
     // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
     let new_uri = format!("{}{}", route.to, routed_path_and_query);
 
+    // @TODO return error response instead of panic?
     *uri = new_uri.parse().expect("routed uri");
+    Ok(req)
+}
+
+/// Return cached response if possible.
+fn handle_cache(req: Request<Body>, _proxy_config: &ProxyConfig, db: &Db) -> Result<Request<Body>, Response<Body>> {
+    let cache_key = CacheKey { method: req.method(), uri: req.uri()};
+    if let Ok(Some(response)) = db.get(cache_key.to_db_key()) {
+        // @TODO: deserialize and return Response
+    }
+    // @TODO return error response when `db.get` returns Err?
     Ok(req)
 }
 
