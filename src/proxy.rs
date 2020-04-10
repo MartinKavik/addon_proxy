@@ -19,22 +19,20 @@ pub use config::{ProxyConfig, ProxyRoute};
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
 
+// @TODO: Use `shadow-clone` crate once the issue https://gitlab.com/efunb/shadow-clone/-/issues/1 is resolved
 /// ```rust,no_run
-/// shadow_clone!(a, b);
+/// shadow_clone!(a, (mut) b);
 /// ```
 /// generates:
 ///
 /// ```rust,no_run
-/// #[allow(unused_mut)]
-/// let mut a = a.clone();
-/// #[allow(unused_mut)]
+/// let a = a.clone();
 /// let mut b = b.clone();
 /// ```
 macro_rules! shadow_clone {
-    ($ ($to_clone:ident) ,*) => {
+    { $($(($mut:tt))? $to_clone:ident),* } => {
         $(
-            #[allow(unused_mut)]
-            let mut $to_clone = $to_clone.clone();
+            let $($mut)? $to_clone = $to_clone.clone();
         )*
     };
 }
@@ -252,7 +250,7 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         let service = service_fn({
             shadow_clone!(db);
             move |req: Request<Body>| {
-                shadow_clone!(config_receiver, client, schedule_config_reload, db);
+                shadow_clone!((mut) config_receiver, client, schedule_config_reload, db);
                 async move {
                     on_request(
                         req,

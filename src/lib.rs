@@ -106,7 +106,6 @@ fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<R
     // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
     let new_uri = format!("{}{}", route.to, routed_path_and_query);
 
-    // @TODO return error response instead of panic?
     *uri = new_uri.parse().expect("routed uri");
     Ok(req)
 }
