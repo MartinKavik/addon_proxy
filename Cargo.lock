@@ -10,6 +10,7 @@ dependencies = [
  "http-serde",
  "hyper",
  "serde",
+ "serde_bytes",
  "serde_derive",
  "sled",
  "tokio",
@@ -507,6 +508,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e707fbbf255b8fc8c3b99abb91e7257a622caeb20a9818cbadbeeede4e0932ff"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "325a073952621257820e7a3469f55ba4726d8b28657e7e36653d1c36dc2c84ae"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

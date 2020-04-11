@@ -4,14 +4,15 @@ use std::hash::{Hash, Hasher};
 
 use hyper::{Body, Client, Request, Response};
 use hyper::client::HttpConnector;
+use hyper::body::Bytes;
 
 use http::{StatusCode, Method, Uri, HeaderMap};
 use http_serde;
 use serde::{Deserialize, Serialize};
 use bincode;
 
-
 pub mod proxy;
+
 use proxy::{ProxyConfig, ScheduleConfigReload, Db};
 
 // ------ CacheKey ------
@@ -20,7 +21,8 @@ use proxy::{ProxyConfig, ScheduleConfigReload, Db};
 /// Key for Sled DB.
 struct CacheKey<'a> {
     method: &'a Method,
-    uri: &'a Uri
+    uri: &'a Uri,
+    body: &'a Bytes,
 }
 
 impl<'a> CacheKey<'a> {
@@ -45,6 +47,7 @@ struct CacheValue {
     status: StatusCode,
     #[serde(with = "http_serde::header_map")]
     headers: HeaderMap,
+    #[serde(with = "serde_bytes")]
     body: Vec<u8>,
 }
 
@@ -62,23 +65,32 @@ pub async fn on_request(
     // println!("proxy config: {:#?}", proxy_config);
     println!("original req: {:#?}", req);
 
+    // @TODO: refactor
+    let (parts, body) = req.into_parts();
+    let body_bytes = hyper::body::to_bytes(body).await?;
+    let req = Request::from_parts(parts, body_bytes);
+
     let req = try_map_request(req, &proxy_config, schedule_config_reload, &db);
     println!("mapped req or response: {:#?}", req);
 
     match req {
         // @TODO serialize and cache the response.
-        Ok(req) => client.request(req).await,
+        Ok(req) => {
+            let (parts, body) = req.into_parts();
+            let req = Request::from_parts(parts, Body::from(body));
+            client.request(req).await
+        },
         Err(response) => Ok(response)
     }
 }
 
 /// Aka "middleware pipeline".
 fn try_map_request(
-    mut req: Request<Body>,
+    mut req: Request<Bytes>,
     proxy_config: &ProxyConfig,
     schedule_config_reload: ScheduleConfigReload,
     db: &Db,
-) -> Result<Request<Body>, Response<Body>> {
+) -> Result<Request<Bytes>, Response<Body>> {
     req = handle_config_reload(req, proxy_config, schedule_config_reload)?;
     req = handle_routes(req, proxy_config)?;
     req = handle_cache(req, proxy_config, db)?;
@@ -87,10 +99,10 @@ fn try_map_request(
 
 /// Schedule proxy config reload and return simple 200 response when the predefined URL path is matched.
 fn handle_config_reload(
-    req: Request<Body>,
+    req: Request<Bytes>,
     proxy_config: &ProxyConfig,
     schedule_config_reload: ScheduleConfigReload
-) -> Result<Request<Body>, Response<Body>> {
+) -> Result<Request<Bytes>, Response<Body>> {
     if req.uri().path() == proxy_config.reload_config_url_path {
         schedule_config_reload();
         return Err(Response::new(Body::from("Proxy config reload scheduled.")))
@@ -104,7 +116,7 @@ fn handle_config_reload(
 ///
 /// - Returns BAD_REQUEST response if there is no matching route.
 /// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
-fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<Request<Body>, Response<Body>> {
+fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<Request<Bytes>, Response<Body>> {
     let uri = req.uri_mut();
     // http://example.com/abc/efg?x=1&y=2 -> example.com/abc/efg?x=1&y=2
     let from = format!("{}{}{}", uri.host().unwrap_or_default(), uri.path(), uri.query().unwrap_or_default());
@@ -145,8 +157,8 @@ fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<R
 /// - Returns cached response.
 /// - Returns INTERNAL_SERVER_ERROR response when DB reading fails.
 /// - Returns INTERNAL_SERVER_ERROR response when deserialization of a cached response fails.
-fn handle_cache(req: Request<Body>, _proxy_config: &ProxyConfig, db: &Db) -> Result<Request<Body>, Response<Body>> {
-    let cache_key = CacheKey { method: req.method(), uri: req.uri()};
+fn handle_cache(req: Request<Bytes>, _proxy_config: &ProxyConfig, db: &Db) -> Result<Request<Bytes>, Response<Body>> {
+    let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
 
     match db.get(cache_key.to_db_key()) {
         // The cached response has been found.
