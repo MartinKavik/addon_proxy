@@ -13,6 +13,7 @@ use proxy::{ProxyConfig, ScheduleConfigReload, Db};
 // ------ CacheKey ------
 
 #[derive(Hash)]
+/// Key for Sled DB.
 struct CacheKey<'a> {
     method: &'a Method,
     uri: &'a Uri
@@ -81,7 +82,11 @@ fn handle_config_reload(
 }
 
 /// Update request's URI to point to another address according to predefined routes.
-/// Returns BAD_REQUEST response if there is no matching route.
+///
+/// # Errors
+///
+/// - Returns BAD_REQUEST response if there is no matching route.
+/// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
 fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<Request<Body>, Response<Body>> {
     let uri = req.uri_mut();
     // http://example.com/abc/efg?x=1&y=2 -> example.com/abc/efg?x=1&y=2
@@ -103,10 +108,17 @@ fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<R
     // @TODO: Replace `trim_start_matches` with `strip_prefix` once stable.
     // example.com/abc/efg?x=1&y=2 -> abc/efg?x=1&y=2  (if matching route's `from` is "example.com")
     let routed_path_and_query = from.trim_start_matches(&route.from).trim_start_matches("/");
-    // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
-    let new_uri = format!("{}{}", route.to, routed_path_and_query);
 
-    *uri = new_uri.parse().expect("routed uri");
+    // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
+    *uri = match format!("{}{}", route.to, routed_path_and_query).parse() {
+        Ok(uri) => uri,
+        Err(err) => {
+            eprintln!("Invalid URI in `handle_routes`: {}", err);
+            let mut response = Response::new(Body::from("Cannot route to invalid URI."));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            return Err(response)
+        }
+    };
     Ok(req)
 }
 
