@@ -5,7 +5,11 @@ use std::hash::{Hash, Hasher};
 use hyper::{Body, Client, Request, Response};
 use hyper::client::HttpConnector;
 
-use http::{StatusCode, Method, Uri};
+use http::{StatusCode, Method, Uri, HeaderMap};
+use http_serde;
+use serde::{Deserialize, Serialize};
+use bincode;
+
 
 pub mod proxy;
 use proxy::{ProxyConfig, ScheduleConfigReload, Db};
@@ -31,6 +35,19 @@ impl<'a> CacheKey<'a> {
         hasher.finish().to_be_bytes()
     }
 }
+
+// ------ CacheValue ------
+
+/// Value for Sled DB.
+#[derive(Deserialize, Serialize)]
+struct CacheValue {
+    #[serde(with = "http_serde::status_code")]
+    status: StatusCode,
+    #[serde(with = "http_serde::header_map")]
+    headers: HeaderMap,
+    body: Vec<u8>,
+}
+
 
 // ------ on_request ------
 
@@ -112,8 +129,8 @@ fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<R
     // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
     *uri = match format!("{}{}", route.to, routed_path_and_query).parse() {
         Ok(uri) => uri,
-        Err(err) => {
-            eprintln!("Invalid URI in `handle_routes`: {}", err);
+        Err(error) => {
+            eprintln!("Invalid URI in `handle_routes`: {}", error);
             let mut response = Response::new(Body::from("Cannot route to invalid URI."));
             *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             return Err(response)
@@ -123,13 +140,46 @@ fn handle_routes(mut req: Request<Body>, proxy_config: &ProxyConfig) -> Result<R
 }
 
 /// Return cached response if possible.
+///
+/// # Errors
+/// - Returns cached response.
+/// - Returns INTERNAL_SERVER_ERROR response when DB reading fails.
+/// - Returns INTERNAL_SERVER_ERROR response when deserialization of a cached response fails.
 fn handle_cache(req: Request<Body>, _proxy_config: &ProxyConfig, db: &Db) -> Result<Request<Body>, Response<Body>> {
     let cache_key = CacheKey { method: req.method(), uri: req.uri()};
-    if let Ok(Some(response)) = db.get(cache_key.to_db_key()) {
-        // @TODO: deserialize and return Response
+
+    match db.get(cache_key.to_db_key()) {
+        // The cached response has been found.
+        Ok(Some(cached_response)) => {
+            Err(match bincode::deserialize::<CacheValue>(cached_response.as_ref()) {
+                // Return the cached response.
+                Ok(cached_response) => {
+                    let mut response = Response::new(Body::from(cached_response.body));
+                    *response.status_mut() = cached_response.status;
+                    *response.headers_mut() = cached_response.headers;
+                    response
+                },
+                // Deserialization failed.
+                Err(error) => {
+                    eprintln!("Cannot deserialize a response`: {}", error);
+                    let mut response = Response::new(Body::from("Cannot deserialize a cached response."));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response
+                }
+            })
+        },
+
+        // The cached response hasn't been found => just return `req` without any changes.
+        Ok(None) => Ok(req),
+
+        // DB reading failed.
+        Err(error) => {
+            eprintln!("Cannot read from DB`: {}", error);
+            let mut response = Response::new(Body::from("Cannot read from the cache."));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            Err(response)
+        }
     }
-    // @TODO return error response when `db.get` returns Err?
-    Ok(req)
 }
 
 
