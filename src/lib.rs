@@ -40,15 +40,28 @@ impl<'a> CacheKey<'a> {
 
 // ------ CacheValue ------
 
+// @TODO: Can we merge it?
+
 /// Value for Sled DB.
-#[derive(Deserialize, Serialize)]
-struct CacheValue {
+#[derive(Deserialize)]
+struct CacheValueForDeserialization {
     #[serde(with = "http_serde::status_code")]
     status: StatusCode,
     #[serde(with = "http_serde::header_map")]
     headers: HeaderMap,
     #[serde(with = "serde_bytes")]
     body: Vec<u8>,
+}
+
+/// Value for Sled DB.
+#[derive(Serialize)]
+struct CacheValueForSerialization<'a> {
+    #[serde(with = "http_serde::status_code")]
+    status: StatusCode,
+    #[serde(with = "http_serde::header_map")]
+    headers: &'a HeaderMap,
+    #[serde(with = "serde_bytes")]
+    body: &'a [u8],
 }
 
 
@@ -65,7 +78,7 @@ pub async fn on_request(
     // println!("proxy config: {:#?}", proxy_config);
     println!("original req: {:#?}", req);
 
-    // @TODO: refactor
+    // @TODO: refactor (also below the similar code)
     let (parts, body) = req.into_parts();
     let body_bytes = hyper::body::to_bytes(body).await?;
     let req = Request::from_parts(parts, body_bytes);
@@ -78,7 +91,22 @@ pub async fn on_request(
         Ok(req) => {
             let (parts, body) = req.into_parts();
             let req = Request::from_parts(parts, Body::from(body));
-            client.request(req).await
+
+
+
+            match client.request(req).await {
+                Ok(response) => {
+                    let cache_value = bincode::serialize(&CacheValueForSerialization {
+                        status: response.status(),
+                        headers: response.headers(),
+                        body: response.body().  // todo into parts to parts,
+                    });
+                    Ok(response)
+                },
+                error => error
+            }
+
+
         },
         Err(response) => Ok(response)
     }
@@ -163,7 +191,7 @@ fn handle_cache(req: Request<Bytes>, _proxy_config: &ProxyConfig, db: &Db) -> Re
     match db.get(cache_key.to_db_key()) {
         // The cached response has been found.
         Ok(Some(cached_response)) => {
-            Err(match bincode::deserialize::<CacheValue>(cached_response.as_ref()) {
+            Err(match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
                 // Return the cached response.
                 Ok(cached_response) => {
                     let mut response = Response::new(Body::from(cached_response.body));
