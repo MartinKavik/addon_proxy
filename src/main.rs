@@ -1,3 +1,5 @@
+#![type_length_limit="1155333"]  // default is 1048576
+
 use ::addon_proxy::{proxy::Proxy, on_request};
 use hyper::Client;
 

@@ -12,6 +12,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_derive",
+ "shadow-clone",
  "sled",
  "tokio",
  "toml",
@@ -529,6 +530,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "shadow-clone"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "885ec8151186e3f357592aac712ef6f06f70d2459b89672fa3d90851d84f52f8"
 
 [[package]]
 name = "slab"

@@ -12,30 +12,13 @@ use tokio::sync::watch;
 use tokio::task;
 
 use sled;
+use shadow_clone::shadow_clone;
 
 mod config;
 
 pub use config::{ProxyConfig, ProxyRoute};
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
-
-// @TODO: Use `shadow-clone` crate once the issue https://gitlab.com/efunb/shadow-clone/-/issues/1 is resolved
-/// ```rust,no_run
-/// shadow_clone!(a, (mut) b);
-/// ```
-/// generates:
-///
-/// ```rust,no_run
-/// let a = a.clone();
-/// let mut b = b.clone();
-/// ```
-macro_rules! shadow_clone {
-    { $($(($mut:tt))? $to_clone:ident),* } => {
-        $(
-            let $($mut)? $to_clone = $to_clone.clone();
-        )*
-    };
-}
 
 // ------ Proxy ------
 
@@ -250,7 +233,7 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         let service = service_fn({
             shadow_clone!(db);
             move |req: Request<Body>| {
-                shadow_clone!((mut) config_receiver, client, schedule_config_reload, db);
+                shadow_clone!(mut config_receiver, client, schedule_config_reload, db);
                 async move {
                     on_request(
                         req,

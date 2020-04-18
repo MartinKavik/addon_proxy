@@ -1,3 +1,5 @@
+#![type_length_limit="1155333"]  // default is 1048576
+
 use std::sync::Arc;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -14,6 +16,7 @@ use bincode;
 pub mod proxy;
 
 use proxy::{ProxyConfig, ScheduleConfigReload, Db};
+use futures_util::future::Future;
 
 // ------ CacheKey ------
 
@@ -78,42 +81,96 @@ pub async fn on_request(
     // println!("proxy config: {:#?}", proxy_config);
     println!("original req: {:#?}", req);
 
-    // @TODO: refactor (also below the similar code)
-    let (parts, body) = req.into_parts();
-    let body_bytes = hyper::body::to_bytes(body).await?;
-    let req = Request::from_parts(parts, body_bytes);
+    let req = map_request_body(req, body_to_bytes).await?;
 
-    let req = try_map_request(req, &proxy_config, schedule_config_reload, &db);
-    println!("mapped req or response: {:#?}", req);
+    let req_or_response = apply_request_middlewares(req, &proxy_config, schedule_config_reload, &db);
+    println!("mapped req or response: {:#?}", req_or_response);
 
-    match req {
-        // @TODO serialize and cache the response.
+    match req_or_response {
         Ok(req) => {
-            let (parts, body) = req.into_parts();
-            let req = Request::from_parts(parts, Body::from(body));
+            let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
+            let db_key = cache_key.to_db_key();
 
-
-
+            let req = map_request_body(req, bytes_to_body).await?;
             match client.request(req).await {
+                // @TODO refactor
                 Ok(response) => {
-                    let cache_value = bincode::serialize(&CacheValueForSerialization {
-                        status: response.status(),
-                        headers: response.headers(),
-                        body: response.body().  // todo into parts to parts,
+                    // We need to convert the body to bytes to clone the response.
+                    let response_with_byte_body = map_response_body(
+                        response, body_to_bytes
+                    ).await?;
+                    // And then back to `Body` so we can return it.
+                    let response = map_response_body(
+                        clone_response(&response_with_byte_body),
+                        bytes_to_body
+                    ).await?;
+
+                    let serialization_result = bincode::serialize(&CacheValueForSerialization {
+                        status: response_with_byte_body.status(),
+                        headers: response_with_byte_body.headers(),
+                        body: response_with_byte_body.body(),
                     });
+                    match serialization_result {
+                        Err(error) => {
+                            eprintln!("cannot serialize response: {}", error);
+                        }
+                        Ok(cache_value) => {
+                            if let Err(error) = db.insert(db_key, cache_value) {
+                                eprintln!("cannot cache response with the key: {}", error);
+                            }
+                        }
+                    }
+
                     Ok(response)
                 },
                 error => error
             }
-
-
         },
         Err(response) => Ok(response)
     }
 }
 
+//@TODO comments, move to standalone files hyper_helpers and try to reduce type complexity?
+async fn body_to_bytes(body: Body) -> Result<Bytes, hyper::Error> {
+    hyper::body::to_bytes(body).await
+}
+
+async fn bytes_to_body(bytes: Bytes) -> Result<Body, hyper::Error> {
+    Ok(Body::from(bytes))
+}
+
+fn clone_response<T: Clone>(response: &Response<T>) -> Response<T> {
+    let mut new_resp = Response::new(response.body().clone());
+    *new_resp.status_mut() = response.status().clone();
+    *new_resp.version_mut() = response.version().clone();
+    *new_resp.headers_mut() = response.headers().clone();
+    // extensions cannot be cloned (note: it's `AnyMap`)
+    // *new_resp.extensions_mut() = response.extensions().clone();
+    new_resp
+}
+
+async fn map_request_body<T, U, F, FO>(req: Request<T>, mapper: F) -> Result<Request<U>, hyper::Error>
+    where
+        FO: Future<Output = Result<U, hyper::Error>>,
+        F: FnOnce(T) -> FO
+{
+    let (parts, body) = req.into_parts();
+    let mapped_body = mapper(body).await?;
+    Ok(Request::from_parts(parts, mapped_body))
+}
+
+async fn map_response_body<T, U, F, FO>(req: Response<T>, mapper: F) -> Result<Response<U>, hyper::Error>
+    where
+        FO: Future<Output = Result<U, hyper::Error>>,
+        F: FnOnce(T) -> FO
+{
+    let (parts, body) = req.into_parts();
+    let mapped_body = mapper(body).await?;
+    Ok(Response::from_parts(parts, mapped_body))
+}
+
 /// Aka "middleware pipeline".
-fn try_map_request(
+fn apply_request_middlewares(
     mut req: Request<Bytes>,
     proxy_config: &ProxyConfig,
     schedule_config_reload: ScheduleConfigReload,
