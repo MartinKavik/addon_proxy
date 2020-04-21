@@ -1,4 +1,5 @@
-#![type_length_limit="1155333"]  // default is 1048576
+// It's needed at least on stable Rust (1.42.0). Nightly (1.44.0) works without it.
+#![type_length_limit="1800000"]  // default is 1048576
 
 use ::addon_proxy::{proxy::Proxy, on_request};
 use hyper::Client;
@@ -7,3 +8,4 @@ use hyper::Client;
 async fn main() {
     Proxy::new(Client::new(), on_request).start().await
 }
+

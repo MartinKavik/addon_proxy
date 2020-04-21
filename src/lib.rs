@@ -1,5 +1,3 @@
-#![type_length_limit="1155333"]  // default is 1048576
-
 use std::sync::Arc;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -14,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use bincode;
 
 pub mod proxy;
+mod hyper_helpers;
 
 use proxy::{ProxyConfig, ScheduleConfigReload, Db};
-use futures_util::future::Future;
+use hyper_helpers::{map_request_body, body_to_bytes, bytes_to_body, fork_response};
 
 // ------ CacheKey ------
 
@@ -42,8 +41,6 @@ impl<'a> CacheKey<'a> {
 }
 
 // ------ CacheValue ------
-
-// @TODO: Can we merge it?
 
 /// Value for Sled DB.
 #[derive(Deserialize)]
@@ -83,90 +80,54 @@ pub async fn on_request(
 
     let req = map_request_body(req, body_to_bytes).await?;
 
-    let req_or_response = apply_request_middlewares(req, &proxy_config, schedule_config_reload, &db);
+    let req_or_response = apply_request_middlewares(
+        req, &proxy_config, schedule_config_reload, &db
+    );
     println!("mapped req or response: {:#?}", req_or_response);
 
     match req_or_response {
+        // A middleware failed or it didn't want to send the given request -
+        // just return prepared `Response`.
+        Err(response) => Ok(response),
+        // Send the modified request.
         Ok(req) => {
-            let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
-            let db_key = cache_key.to_db_key();
+            let response_db_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()}
+                .to_db_key();
 
+            // We need to convert `Request<Bytes>` to `Request<Body>` to send it.
             let req = map_request_body(req, bytes_to_body).await?;
+            // Send request.
             match client.request(req).await {
-                // @TODO refactor
                 Ok(response) => {
-                    // We need to convert the body to bytes to clone the response.
-                    let response_with_byte_body = map_response_body(
-                        response, body_to_bytes
-                    ).await?;
-                    // And then back to `Body` so we can return it.
-                    let response = map_response_body(
-                        clone_response(&response_with_byte_body),
-                        bytes_to_body
-                    ).await?;
+                    let (response, response_with_byte_body) = fork_response(response).await?;
 
-                    let serialization_result = bincode::serialize(&CacheValueForSerialization {
-                        status: response_with_byte_body.status(),
-                        headers: response_with_byte_body.headers(),
-                        body: response_with_byte_body.body(),
-                    });
+                    let serialization_result = bincode::serialize(
+                        &CacheValueForSerialization {
+                            status: response_with_byte_body.status(),
+                            headers: response_with_byte_body.headers(),
+                            body: response_with_byte_body.body(),
+                        }
+                    );
                     match serialization_result {
                         Err(error) => {
                             eprintln!("cannot serialize response: {}", error);
                         }
                         Ok(cache_value) => {
-                            if let Err(error) = db.insert(db_key, cache_value) {
+                            // Try to cache the response.
+                            if let Err(error) = db.insert(response_db_key, cache_value) {
                                 eprintln!("cannot cache response with the key: {}", error);
+                            } else {
+                                println!("response has been successfully cached");
                             }
                         }
                     }
-
                     Ok(response)
                 },
-                error => error
+                // Request failed - return the response without caching.
+                error_response => error_response
             }
         },
-        Err(response) => Ok(response)
     }
-}
-
-//@TODO comments, move to standalone files hyper_helpers and try to reduce type complexity?
-async fn body_to_bytes(body: Body) -> Result<Bytes, hyper::Error> {
-    hyper::body::to_bytes(body).await
-}
-
-async fn bytes_to_body(bytes: Bytes) -> Result<Body, hyper::Error> {
-    Ok(Body::from(bytes))
-}
-
-fn clone_response<T: Clone>(response: &Response<T>) -> Response<T> {
-    let mut new_resp = Response::new(response.body().clone());
-    *new_resp.status_mut() = response.status().clone();
-    *new_resp.version_mut() = response.version().clone();
-    *new_resp.headers_mut() = response.headers().clone();
-    // extensions cannot be cloned (note: it's `AnyMap`)
-    // *new_resp.extensions_mut() = response.extensions().clone();
-    new_resp
-}
-
-async fn map_request_body<T, U, F, FO>(req: Request<T>, mapper: F) -> Result<Request<U>, hyper::Error>
-    where
-        FO: Future<Output = Result<U, hyper::Error>>,
-        F: FnOnce(T) -> FO
-{
-    let (parts, body) = req.into_parts();
-    let mapped_body = mapper(body).await?;
-    Ok(Request::from_parts(parts, mapped_body))
-}
-
-async fn map_response_body<T, U, F, FO>(req: Response<T>, mapper: F) -> Result<Response<U>, hyper::Error>
-    where
-        FO: Future<Output = Result<U, hyper::Error>>,
-        F: FnOnce(T) -> FO
-{
-    let (parts, body) = req.into_parts();
-    let mapped_body = mapper(body).await?;
-    Ok(Response::from_parts(parts, mapped_body))
 }
 
 /// Aka "middleware pipeline".
@@ -251,6 +212,7 @@ fn handle_cache(req: Request<Bytes>, _proxy_config: &ProxyConfig, db: &Db) -> Re
             Err(match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
                 // Return the cached response.
                 Ok(cached_response) => {
+                    println!("response has been successfully loaded from the cache");
                     let mut response = Response::new(Body::from(cached_response.body));
                     *response.status_mut() = cached_response.status;
                     *response.headers_mut() = cached_response.headers;
