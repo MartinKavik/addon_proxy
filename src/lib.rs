@@ -139,6 +139,7 @@ fn apply_request_middlewares(
 ) -> Result<Request<Bytes>, Response<Body>> {
     req = handle_config_reload(req, proxy_config, schedule_config_reload)?;
     req = handle_clear_cache(req, proxy_config, db)?;
+    req = handle_status(req, proxy_config)?;
     req = handle_routes(req, proxy_config)?;
     req = handle_cache(req, proxy_config, db)?;
     Ok(req)
@@ -157,7 +158,7 @@ fn handle_config_reload(
     Ok(req)
 }
 
-/// Schedule proxy config reload and return simple 200 response when the predefined URL path is matched.
+/// Clear cache and return simple 200 response when the predefined URL path is matched.
 fn handle_clear_cache(
     req: Request<Bytes>,
     proxy_config: &ProxyConfig,
@@ -169,6 +170,17 @@ fn handle_clear_cache(
             return Err(Response::new(Body::from("Cache clearing failed.")))
         }
         return Err(Response::new(Body::from("Cache cleared.")))
+    }
+    Ok(req)
+}
+
+/// Return response with text "Proxy is ready." when the predefined URL path is matched.
+fn handle_status(
+    req: Request<Bytes>,
+    proxy_config: &ProxyConfig,
+) -> Result<Request<Bytes>, Response<Body>> {
+    if req.uri().path() == proxy_config.status_url_path {
+        return Err(Response::new(Body::from("Proxy is ready.")))
     }
     Ok(req)
 }

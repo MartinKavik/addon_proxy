@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::env;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
@@ -17,6 +18,7 @@ use shadow_clone::shadow_clone;
 mod config;
 
 pub use config::{ProxyConfig, ProxyRoute};
+use std::net::SocketAddr;
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
 
@@ -197,7 +199,11 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
         let client = Arc::clone(&self.client);
         let config_path = self.config_path.clone();
         let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
-        let addr = proxy_config.socket_address.clone();
+        let addr = SocketAddr::new(
+            proxy_config.ip,
+            env::var("PORT").ok().and_then(|port| port.parse().ok())
+                .unwrap_or(proxy_config.default_port),
+        );
         // All operations in sled are thread-safe.
         // The Db may be cloned and shared across threads without needing to use Arc or Mutex etc…
         let db = sled::open(&proxy_config.db_directory).expect("open database");
