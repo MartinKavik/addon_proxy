@@ -192,9 +192,14 @@ fn handle_status(
 /// - Returns BAD_REQUEST response if there is no matching route.
 /// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
 fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<Request<Bytes>, Response<Body>> {
-    let uri = req.uri_mut();
+    let uri = req.uri();
+    // Try to get the host directly from `req.uri`, then from `host` header and then represent it as relative url.
+    let host = uri.host()
+        .or_else(|| req.headers().get("host").and_then(|value| value.to_str().ok()))
+        .unwrap_or_default();
+
     // http://example.com/abc/efg?x=1&y=2 -> example.com/abc/efg?x=1&y=2
-    let from = format!("{}{}{}", uri.host().unwrap_or_default(), uri.path(), uri.query().unwrap_or_default());
+    let from = format!("{}{}{}", host, uri.path(), uri.query().unwrap_or_default());
 
     // Get the first matching route or return BAD_REQUEST.
     let route = proxy_config.routes.iter().find(|route| {
@@ -214,7 +219,7 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
     let routed_path_and_query = from.trim_start_matches(&route.from).trim_start_matches("/");
 
     // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
-    *uri = match format!("{}{}", route.to, routed_path_and_query).parse() {
+    *req.uri_mut() = match format!("{}{}", route.to, routed_path_and_query).parse() {
         Ok(uri) => uri,
         Err(error) => {
             eprintln!("Invalid URI in `handle_routes`: {}", error);
