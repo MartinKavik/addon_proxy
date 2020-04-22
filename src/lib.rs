@@ -138,6 +138,7 @@ fn apply_request_middlewares(
     db: &Db,
 ) -> Result<Request<Bytes>, Response<Body>> {
     req = handle_config_reload(req, proxy_config, schedule_config_reload)?;
+    req = handle_clear_cache(req, proxy_config, db)?;
     req = handle_routes(req, proxy_config)?;
     req = handle_cache(req, proxy_config, db)?;
     Ok(req)
@@ -152,6 +153,22 @@ fn handle_config_reload(
     if req.uri().path() == proxy_config.reload_config_url_path {
         schedule_config_reload();
         return Err(Response::new(Body::from("Proxy config reload scheduled.")))
+    }
+    Ok(req)
+}
+
+/// Schedule proxy config reload and return simple 200 response when the predefined URL path is matched.
+fn handle_clear_cache(
+    req: Request<Bytes>,
+    proxy_config: &ProxyConfig,
+    db: &Db
+) -> Result<Request<Bytes>, Response<Body>> {
+    if req.uri().path() == proxy_config.clear_cache_url_path {
+        if let Err(error) = db.clear() {
+            eprintln!("cache clearing failed: {}", error);
+            return Err(Response::new(Body::from("Cache clearing failed.")))
+        }
+        return Err(Response::new(Body::from("Cache cleared.")))
     }
     Ok(req)
 }

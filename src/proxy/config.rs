@@ -10,7 +10,7 @@ use http::Uri;
 /// Proxy configuration loaded from the TOML file.
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyConfig {
-    /// Send a request with this url path to schedule reload of this configuration
+    /// Send a request with this url path to schedule reload of this configuration.
     ///
     /// (e.g. GET http://example.com/url/path/for/reloading).
     ///
@@ -20,6 +20,17 @@ pub struct ProxyConfig {
     /// reload_config_url_path = "/reload-proxy-config"
     /// ```
     pub reload_config_url_path: String,
+
+    /// Send a request with this url path to clear cache.
+    ///
+    /// (e.g. GET http://example.com/url/path/to/clear/cache).
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// clear_cache_url_path = "/clear-cache"
+    /// ```
+    pub clear_cache_url_path: String,
 
     /// The directory where the cached responses and other proxy data should be saved.
     ///
