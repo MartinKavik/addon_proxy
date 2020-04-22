@@ -3,8 +3,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use hyper::{Body, Client, Request, Response};
-use hyper::client::HttpConnector;
 use hyper::body::Bytes;
+use hyper::client::HttpConnector;
+
+use hyper_tls::HttpsConnector;
 
 use http::{StatusCode, Method, Uri, HeaderMap};
 use http_serde;
@@ -70,7 +72,7 @@ struct CacheValueForSerialization<'a> {
 /// See documentation for struct `Proxy` fields.
 pub async fn on_request(
     req: Request<Body>,
-    client: Arc<Client<HttpConnector>>,
+    client: Arc<Client<HttpsConnector<HttpConnector>>>,
     proxy_config: Arc<ProxyConfig>,
     schedule_config_reload: ScheduleConfigReload,
     db: Db,
@@ -99,29 +101,35 @@ pub async fn on_request(
             // Send request.
             match client.request(req).await {
                 Ok(response) => {
-                    let (response, response_with_byte_body) = fork_response(response).await?;
+                    if !proxy_config.cache_enabled {
+                        println!("original response: {:#?}", response);
+                        Ok(response)
+                    } else {
+                        let (response, response_with_byte_body) = fork_response(response).await?;
 
-                    let serialization_result = bincode::serialize(
-                        &CacheValueForSerialization {
-                            status: response_with_byte_body.status(),
-                            headers: response_with_byte_body.headers(),
-                            body: response_with_byte_body.body(),
-                        }
-                    );
-                    match serialization_result {
-                        Err(error) => {
-                            eprintln!("cannot serialize response: {}", error);
-                        }
-                        Ok(cache_value) => {
-                            // Try to cache the response.
-                            if let Err(error) = db.insert(response_db_key, cache_value) {
-                                eprintln!("cannot cache response with the key: {}", error);
-                            } else {
-                                println!("response has been successfully cached");
+                        let serialization_result = bincode::serialize(
+                            &CacheValueForSerialization {
+                                status: response_with_byte_body.status(),
+                                headers: response_with_byte_body.headers(),
+                                body: response_with_byte_body.body(),
+                            }
+                        );
+                        match serialization_result {
+                            Err(error) => {
+                                eprintln!("cannot serialize response: {}", error);
+                            }
+                            Ok(cache_value) => {
+                                // Try to cache the response.
+                                if let Err(error) = db.insert(response_db_key, cache_value) {
+                                    eprintln!("cannot cache response with the key: {}", error);
+                                } else {
+                                    println!("response has been successfully cached");
+                                }
                             }
                         }
+                        println!("original and just cached response: {:#?}", response);
+                        Ok(response)
                     }
-                    Ok(response)
                 },
                 // Request failed - return the response without caching.
                 error_response => error_response
@@ -141,7 +149,9 @@ fn apply_request_middlewares(
     req = handle_clear_cache(req, proxy_config, db)?;
     req = handle_status(req, proxy_config)?;
     req = handle_routes(req, proxy_config)?;
-    req = handle_cache(req, proxy_config, db)?;
+    if proxy_config.cache_enabled {
+        req = handle_cache(req, proxy_config, db)?;
+    }
     Ok(req)
 }
 
@@ -228,6 +238,18 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
             return Err(response)
         }
     };
+
+    // Replace `host` header with the new one from `Request`'s `uri`.
+    match req.uri().host().and_then(|host| host.parse().ok()) {
+        Some(host) => req.headers_mut().insert("host", host),
+        None => {
+            eprintln!("Missing host in the request uri: {}", req.uri());
+            let mut response = Response::new(Body::from("Cannot route to URI without host."));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            return Err(response)
+        }
+    };
+
     Ok(req)
 }
 

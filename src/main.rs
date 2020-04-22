@@ -3,9 +3,13 @@
 
 use ::addon_proxy::{proxy::Proxy, on_request};
 use hyper::Client;
+use hyper_tls::HttpsConnector;
 
 #[tokio::main]
 async fn main() {
-    Proxy::new(Client::new(), on_request).start().await
+    Proxy::new(
+        Client::builder().build(HttpsConnector::new()),
+        on_request
+    ).start().await
 }
 

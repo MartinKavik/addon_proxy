@@ -73,6 +73,15 @@ pub struct ProxyConfig {
     /// ```
     pub default_port: u16,
 
+    /// Allow to cache responses and load the cached ones.
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// cache_enabled = false
+    /// ```
+    pub cache_enabled: bool,
+
     /// Routes for the proxy router.
     ///
     /// # Example (TOML)
