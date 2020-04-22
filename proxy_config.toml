@@ -9,6 +9,16 @@ ip = "0.0.0.0"
 default_port = 5000
 
 [[routes]]
+from = "stremio-addon-example.dev"
+to = "http://127.0.0.1:1337"
+
+[[routes]]
+from = "stremio-addon-proxy.herokuapp.com/rust-addon"
+to = "https://stremio-addon-example.herokuapp.com"
+
+# Routes for experiments
+
+[[routes]]
 from = "example.com"
 to = "http://localhost:8000"
 
