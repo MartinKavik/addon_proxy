@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use bincode;
 
 use crate::proxy::{ProxyConfig, ScheduleConfigReload, Db};
+use crate::proxy::business;
 use crate::hyper_helpers::{map_request_body, body_to_bytes, bytes_to_body, fork_response};
 
 // ------ CacheKey ------
@@ -197,6 +198,7 @@ fn handle_status(
 /// # Errors
 ///
 /// - Returns 200 and the content of `landing.html` when the incoming request does not match any routes.
+/// - Returns BAD_REQUEST when request validation fails.
 /// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
 fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<Request<Bytes>, Response<Body>> {
     let uri = req.uri();
@@ -222,11 +224,19 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
     };
 
     // @TODO: Replace `trim_start_matches` with `strip_prefix` once stable.
-    // example.com/abc/efg?x=1&y=2 -> abc/efg?x=1&y=2  (if matching route's `from` is "example.com")
-    let routed_path_and_query = from.trim_start_matches(&route.from).trim_start_matches("/");
+    // example.com/abc/efg?x=1&y=2 -> /abc/efg?x=1&y=2  (if matching route's `from` is "example.com")
+    let routed_path_and_query = from.trim_start_matches(&route.from);
 
-    // abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
-    *req.uri_mut() = match format!("{}{}", route.to, routed_path_and_query).parse() {
+    // Request validation.
+    if route.validate != Some(false) && !business::validate_request(routed_path_and_query) {
+        let mut response = Response::new(Body::from("Invalid request."));
+        *response.status_mut() = StatusCode::BAD_REQUEST;
+        return Err(response)
+    }
+
+    // @TODO: Replace `trim_start_matches` with `strip_prefix` once stable.
+    // /abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
+    *req.uri_mut() = match format!("{}{}", route.to, routed_path_and_query.trim_start_matches("/")).parse() {
         Ok(uri) => uri,
         Err(error) => {
             eprintln!("Invalid URI in `handle_routes`: {}", error);

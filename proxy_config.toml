@@ -10,11 +10,19 @@ default_port = 5000
 cache_enabled = false
 
 [[routes]]
+from = "stremio-addon-helloworld.dev"
+to = "http://127.0.0.1:1337"
+
+[[routes]]
 from = "stremio-addon-example.dev"
 to = "http://127.0.0.1:1337"
 
 [[routes]]
-from = "stremio-addon-helloworld.dev"
+from = "127.0.0.1:5000/helloworld"
+to = "http://127.0.0.1:1337"
+
+[[routes]]
+from = "127.0.0.1:5000/rust-addon"
 to = "http://127.0.0.1:1337"
 
 [[routes]]

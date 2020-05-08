@@ -7,16 +7,17 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = "0.13.4"
-tokio = { version = "0.2.14", features = [ "macros", "sync", "fs" ] }
+hyper = "0.13.5"
+tokio = { version = "0.2.20", features = [ "macros", "sync", "fs" ] }
 futures-util = "0.3.4"
 toml = "0.5.6"
 http = "0.2.1"
 http-serde = "1.0.1"
-serde = "1.0.105"
-serde_derive = "1.0.105"
-serde_bytes = "0.11.3"
+serde = "1.0.106"
+serde_derive = "1.0.106"
+serde_bytes = "0.11.4"
 sled = "0.31.0"
 bincode = "1.2.1"
-shadow-clone = "1.2.0"
+shadow-clone = "1.2.1"
 hyper-tls = "0.4.1"
+stremio-core = { git = "https://github.com/Stremio/stremio-core.git" }
