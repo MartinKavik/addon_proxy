@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::env;
+use std::net::SocketAddr;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
@@ -16,9 +17,10 @@ use sled;
 use shadow_clone::shadow_clone;
 
 mod config;
+mod on_request;
 
 pub use config::{ProxyConfig, ProxyRoute};
-use std::net::SocketAddr;
+pub use on_request::on_request;
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
 

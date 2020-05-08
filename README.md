@@ -40,7 +40,7 @@ _Notes:_
    
 ### 2. Layer - Middlewares
 
-1. The most important function in this layer is `on_request` (currently in `lib.rs`).
+1. The most important function in this layer is `on_request` (in `on_request.rs`).
 1. `on_request` receives user's request from the proxy core and then:
    1. The request is passed into middleware pipeline (function `apply_request_middlewares`).
    1. Middlewares return modified request or custom / error / cached response. 
