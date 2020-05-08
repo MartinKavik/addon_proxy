@@ -199,7 +199,7 @@ fn handle_status(
 ///
 /// # Errors
 ///
-/// - Returns BAD_REQUEST response if there is no matching route.
+/// - Returns 200 and the content of `landing.html` when the incoming request does not match any routes.
 /// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
 fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<Request<Bytes>, Response<Body>> {
     let uri = req.uri();
@@ -211,15 +211,15 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
     // http://example.com/abc/efg?x=1&y=2 -> example.com/abc/efg?x=1&y=2
     let from = format!("{}{}{}", host, uri.path(), uri.query().unwrap_or_default());
 
-    // Get the first matching route or return BAD_REQUEST.
+    // Get the first matching route or return a landing file.
     let route = proxy_config.routes.iter().find(|route| {
         from.starts_with(&route.from)
     });
     let route = match route {
         Some(route) => route,
         None => {
-            let mut response = Response::new(Body::from("No route matches."));
-            *response.status_mut() = StatusCode::BAD_REQUEST;
+            // Return `landing.html`.
+            let response = Response::new(Body::from(include_bytes!("../landing.html").as_ref()));
             return Err(response)
         }
     };

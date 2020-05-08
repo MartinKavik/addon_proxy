@@ -7,7 +7,7 @@ status_url_path = "/status"
 db_directory = "proxy_db"
 ip = "0.0.0.0"
 default_port = 5000
-cache_enabled = true
+cache_enabled = false
 
 [[routes]]
 from = "stremio-addon-example.dev"
