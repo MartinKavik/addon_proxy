@@ -82,6 +82,15 @@ pub struct ProxyConfig {
     /// ```
     pub cache_enabled: bool,
 
+    /// How many seconds to wait for the response from origins.
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// timeout = 20
+    /// ```
+    pub timeout: u64,
+
     /// Routes for the proxy router.
     ///
     /// # Example (TOML)

@@ -8,6 +8,7 @@ db_directory = "proxy_db"
 ip = "0.0.0.0"
 default_port = 5000
 cache_enabled = false
+timeout = 20
 
 [[routes]]
 from = "stremio-addon-helloworld.dev"

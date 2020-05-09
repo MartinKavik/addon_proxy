@@ -51,17 +51,18 @@ pub type Db = sled::Db;
 ///
 /// - `C` = client connector
 /// - `B` = request body
+/// - `CC` = client creator
 /// - `OR` = `on_request` function
 /// - `ORO` = `on_request` output (aka return value)
-pub struct Proxy<C, B, OR, ORO> {
+pub struct Proxy<C, B, CC, OR, ORO> {
     /// Where the TOML file with settings is located.
     pub config_path: PathBuf,
 
-    /// The client that is passed to all `on_request` calls.
+    /// A function that returns a client that is passed to all `on_request` calls.
     ///
     /// _Note:_ To support also TLS and use other connectors, see
     /// [hyper.rs Client configuration](https://hyper.rs/guides/client/configuration/).
-    pub client: Arc<Client<C, B>>,
+    pub client_creator: CC,
 
     /// `on_request` is invoked for each request.
     /// It allows you to modify or validate the original request.
@@ -117,13 +118,14 @@ pub struct Proxy<C, B, OR, ORO> {
     ///
     /// Returns `hyper::Error` when request fails.
     pub on_request: OR,
-    _phantom: PhantomData<ORO>,
+    _phantom: (PhantomData<C>, PhantomData<B>, PhantomData<ORO>),
 }
 
-impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
+impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     where
         C: Send + Sync + 'static,
         B: Send + 'static,
+        CC: Fn(&ProxyConfig) -> Client<C, B>,
         ORO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
         OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, ScheduleConfigReload, Db) -> ORO + Send + Sync + Copy + 'static,
 {
@@ -141,15 +143,15 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     Proxy::new(Client::new(), on_request).start().await
+    ///     Proxy::new(|_proxy_config| Client::new(), on_request).start().await
     /// }
     /// ```
-    pub fn new(client: Client<C, B>, on_request: OR) -> Self {
+    pub fn new(client_creator: CC, on_request: OR) -> Self {
         Self {
             config_path: PathBuf::from(DEFAULT_CONFIG_PATH),
-            client: Arc::new(client),
+            client_creator,
             on_request,
-            _phantom: PhantomData
+            _phantom: (PhantomData, PhantomData, PhantomData)
         }
     }
 
@@ -199,9 +201,9 @@ impl<C, B, OR, ORO> Proxy<C, B, OR, ORO>
     /// (this shouldn't happen in practice).
     pub async fn start(&self) {
         let on_request = self.on_request;
-        let client = Arc::clone(&self.client);
         let config_path = self.config_path.clone();
         let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
+        let client = Arc::new((&self.client_creator)(&proxy_config));
         let addr = SocketAddr::new(
             proxy_config.ip,
             env::var("PORT").ok().and_then(|port| port.parse().ok())

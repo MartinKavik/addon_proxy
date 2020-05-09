@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use hyper::{Body, Client, Request, Response};
 use hyper::body::Bytes;
 use hyper::client::HttpConnector;
+use hyper_timeout::TimeoutConnector;
 
 use hyper_tls::HttpsConnector;
 
@@ -70,7 +71,7 @@ struct CacheValueForSerialization<'a> {
 /// See documentation for struct `Proxy` fields.
 pub async fn on_request(
     req: Request<Body>,
-    client: Arc<Client<HttpsConnector<HttpConnector>>>,
+    client: Arc<Client<TimeoutConnector<HttpsConnector<HttpConnector>>>>,
     proxy_config: Arc<ProxyConfig>,
     schedule_config_reload: ScheduleConfigReload,
     db: Db,
