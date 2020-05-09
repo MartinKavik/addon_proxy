@@ -13,6 +13,7 @@ timeout = 20
 [[routes]]
 from = "stremio-addon-helloworld.dev"
 to = "http://127.0.0.1:1337"
+validate = false
 
 [[routes]]
 from = "stremio-addon-example.dev"

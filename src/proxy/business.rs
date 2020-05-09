@@ -1,5 +1,6 @@
 use std::str::FromStr;
 use stremio_core::types::addons::ResourceRef;
+use hyper::{Body, Response};
 
 pub fn validate_request(path: &str) -> bool {
     if path == "/manifest.json" {
@@ -12,4 +13,8 @@ pub fn validate_request(path: &str) -> bool {
     }
 
     true
+}
+
+pub fn validate_response(response: &Response<Body>) -> bool {
+    response.status().is_success()
 }

@@ -16,7 +16,7 @@ use bincode;
 
 use crate::proxy::{ProxyConfig, ScheduleConfigReload, Db};
 use crate::proxy::business;
-use crate::hyper_helpers::{map_request_body, body_to_bytes, bytes_to_body, fork_response};
+use crate::hyper_helpers::{map_request_body, clone_request, body_to_bytes, bytes_to_body, fork_response};
 
 // ------ CacheKey ------
 
@@ -68,10 +68,12 @@ struct CacheValueForSerialization<'a> {
 
 // ------ on_request ------
 
+type OnRequestClient = Arc<Client<TimeoutConnector<HttpsConnector<HttpConnector>>>>;
+
 /// See documentation for struct `Proxy` fields.
 pub async fn on_request(
     req: Request<Body>,
-    client: Arc<Client<TimeoutConnector<HttpsConnector<HttpConnector>>>>,
+    client: OnRequestClient,
     proxy_config: Arc<ProxyConfig>,
     schedule_config_reload: ScheduleConfigReload,
     db: Db,
@@ -92,49 +94,90 @@ pub async fn on_request(
         Err(response) => Ok(response),
         // Send the modified request.
         Ok(req) => {
-            let response_db_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()}
-                .to_db_key();
-
-            // We need to convert `Request<Bytes>` to `Request<Body>` to send it.
-            let req = map_request_body(req, bytes_to_body).await?;
-            // Send request.
-            match client.request(req).await {
-                Ok(response) => {
-                    if !proxy_config.cache_enabled {
-                        println!("original response: {:#?}", response);
-                        Ok(response)
-                    } else {
-                        let (response, response_with_byte_body) = fork_response(response).await?;
-
-                        let serialization_result = bincode::serialize(
-                            &CacheValueForSerialization {
-                                status: response_with_byte_body.status(),
-                                headers: response_with_byte_body.headers(),
-                                body: response_with_byte_body.body(),
-                            }
-                        );
-                        match serialization_result {
-                            Err(error) => {
-                                eprintln!("cannot serialize response: {}", error);
-                            }
-                            Ok(cache_value) => {
-                                // Try to cache the response.
-                                if let Err(error) = db.insert(response_db_key, cache_value) {
-                                    eprintln!("cannot cache response with the key: {}", error);
-                                } else {
-                                    println!("response has been successfully cached");
-                                }
-                            }
-                        }
-                        println!("original and just cached response: {:#?}", response);
-                        Ok(response)
-                    }
-                },
-                // Request failed - return the response without caching.
-                error_response => error_response
-            }
+            send_request_and_handle_response(req, &client, &proxy_config, &db).await
         },
     }
+}
+
+/// Send the request to origin and handle request fails and origin response.
+async fn send_request_and_handle_response(
+    req: Request<Bytes>, 
+    client: &OnRequestClient, 
+    proxy_config: &ProxyConfig, 
+    db: &Db
+) -> Result<Response<Body>, hyper::Error> {
+    let response_db_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()}
+        .to_db_key();
+
+    // We need to clone the request so we can use it later, when the request or response fails,
+    // so we can try to get at least cached response.
+    let req_clone = clone_request(&req);
+
+    // We need to convert `Request<Bytes>` to `Request<Body>` to send it.
+    let req = map_request_body(req, bytes_to_body).await?;
+
+    // Send request.
+    match client.request(req).await {
+        Ok(response) => {
+            if !business::validate_response(&response) {
+                return Ok(handle_origin_fail(req_clone, db))
+            }
+            if !proxy_config.cache_enabled {
+                println!("original response: {:#?}", response);
+                return Ok(response)
+            }
+            cache_response(response, response_db_key, db).await
+        },
+        // Request failed - return the response without caching.
+        Err(error) => {
+            eprintln!("Request error: {:#?}", error);
+            return Ok(handle_origin_fail(req_clone, db))
+        }
+    }
+}
+
+/// Request to origin failed (e.g. timeout) or the response is invalid.
+fn handle_origin_fail(req: Request<Bytes>, db: &Db) -> Response<Body> {
+    if let Err(response) = handle_cache(req, db) {
+        // Return cached response or INTERNAL_SERVER_ERROR if something failed (DB or deserialization),
+        return response
+    }
+
+    // We weren't able to get a fresh response and there isn't a cached one.
+    let mut response = Response::new(Body::from("No valid response."));
+    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+    response
+}
+
+/// Cache response. 
+/// It only logs cache errors because it's not a reason to not deliver response to the user.
+async fn cache_response(
+    response: Response<Body>, response_db_key: [u8; 8], db:&Db
+) -> Result<Response<Body>, hyper::Error> {
+    let (response, response_with_byte_body) = fork_response(response).await?;
+
+    let serialization_result = bincode::serialize(
+        &CacheValueForSerialization {
+            status: response_with_byte_body.status(),
+            headers: response_with_byte_body.headers(),
+            body: response_with_byte_body.body(),
+        }
+    );
+    match serialization_result {
+        Err(error) => {
+            eprintln!("cannot serialize response: {}", error);
+        }
+        Ok(cache_value) => {
+            // Try to cache the response.
+            if let Err(error) = db.insert(response_db_key, cache_value) {
+                eprintln!("cannot cache response with the key: {}", error);
+            } else {
+                println!("response has been successfully cached");
+            }
+        }
+    }
+    println!("original and just cached response: {:#?}", response);
+    Ok(response)
 }
 
 /// Aka "middleware pipeline".
@@ -149,7 +192,7 @@ fn apply_request_middlewares(
     req = handle_status(req, proxy_config)?;
     req = handle_routes(req, proxy_config)?;
     if proxy_config.cache_enabled {
-        req = handle_cache(req, proxy_config, db)?;
+        req = handle_cache(req, db)?;
     }
     Ok(req)
 }
@@ -267,7 +310,7 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
 /// - Returns cached response.
 /// - Returns INTERNAL_SERVER_ERROR response when DB reading fails.
 /// - Returns INTERNAL_SERVER_ERROR response when deserialization of a cached response fails.
-fn handle_cache(req: Request<Bytes>, _proxy_config: &ProxyConfig, db: &Db) -> Result<Request<Bytes>, Response<Body>> {
+fn handle_cache(req: Request<Bytes>, db: &Db) -> Result<Request<Bytes>, Response<Body>> {
     let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
 
     match db.get(cache_key.to_db_key()) {

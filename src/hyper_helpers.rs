@@ -42,6 +42,18 @@ pub async fn map_response_body<T, U, F, FO>(req: Response<T>, mapper: F) -> Resu
     Ok(Response::from_parts(parts, mapped_body))
 }
 
+/// Clone `Request`.
+///
+/// _Warning:_: Extensions cannot be cloned.
+pub fn clone_request<T: Clone>(req: &Request<T>) -> Request<T> {
+    let mut new_req = Request::new(req.body().clone());
+    *new_req.method_mut() = req.method().clone();
+    *new_req.uri_mut() = req.uri().clone();
+    *new_req.version_mut() = req.version().clone();
+    *new_req.headers_mut() = req.headers().clone();
+    new_req
+}
+
 /// Clone `Response`.
 ///
 /// _Warning:_: Extensions cannot be cloned.
