@@ -80,7 +80,17 @@ pub struct ProxyConfig {
     /// ```toml
     /// cache_enabled = false
     /// ```
-    pub cache_enabled: bool,    
+    pub cache_enabled: bool,        
+    
+    /// How many seconds is a cached response valid,
+    /// if its validity isn't explicitly defined by its response headers.
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// default_cache_validity = 600  # 10 * 60
+    /// ```
+    pub default_cache_validity: u32,    
     
     /// If the origin is failing for some reason (returning non-200, timing out),
     /// the proxy tries to return the cached response, even if it's stale. 
@@ -91,7 +101,7 @@ pub struct ProxyConfig {
     /// # Example (TOML)
     ///
     /// ```toml
-    /// cache_enabled = false
+    /// cache_stale_threshold_on_fail = 172_800 # 48 * 60 * 60
     /// ```
     pub cache_stale_threshold_on_fail: u32,
 
@@ -102,7 +112,7 @@ pub struct ProxyConfig {
     /// ```toml
     /// timeout = 20
     /// ```
-    pub timeout: u64,
+    pub timeout: u32,
 
     /// Routes for the proxy router.
     ///

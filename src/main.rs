@@ -13,7 +13,7 @@ async fn main() {
         |proxy_config| {
             let https = HttpsConnector::new();
             let mut connector = TimeoutConnector::new(https);
-            connector.set_read_timeout(Some(Duration::from_secs(proxy_config.timeout)));
+            connector.set_read_timeout(Some(Duration::from_secs(u64::from(proxy_config.timeout))));
             Client::builder().build(connector)
         },
         on_request
