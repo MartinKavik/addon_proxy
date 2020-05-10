@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 bincode = "1.2.1"
+cache_control = "0.1.0"
 chrono = "0.4.11"
 futures-util = "0.3.4"
 hyper = "0.13.5"

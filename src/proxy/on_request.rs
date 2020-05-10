@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::convert::TryFrom;
 
-use hyper::{Body, Client, Request, Response};
+use hyper::{Body, Client, Request, Response, header};
 use hyper::body::Bytes;
 use hyper::client::HttpConnector;
 use hyper_timeout::TimeoutConnector;
@@ -14,7 +15,7 @@ use http_serde;
 use serde::{Deserialize, Serialize};
 use bincode;
 use chrono::Utc;
-
+use cache_control::CacheControl;
 
 use crate::proxy::{ProxyConfig, ScheduleConfigReload, Db};
 use crate::proxy::business;
@@ -55,6 +56,8 @@ struct CacheValueForDeserialization {
     #[serde(with = "serde_bytes")]
     body: Vec<u8>,
     timestamp: i64,
+    // Cached response is valid for `validity` seconds.
+    validity: u32,
 }
 
 /// Value for Sled DB.
@@ -67,6 +70,8 @@ struct CacheValueForSerialization<'a> {
     #[serde(with = "serde_bytes")]
     body: &'a [u8],
     timestamp: i64,
+    // Cached response is valid for `validity` seconds.
+    validity: u32,
 }
 
 
@@ -130,7 +135,7 @@ async fn send_request_and_handle_response(
                 println!("original response: {:#?}", response);
                 return Ok(response)
             }
-            cache_response(response, response_db_key, db).await
+            cache_response(response, response_db_key, proxy_config, db).await
         },
         // Request failed - return the response without caching.
         Err(error) => {
@@ -194,7 +199,7 @@ fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) 
 /// 
 /// _Note:_: It only logs cache errors because it's not a reason to not deliver response to the user.
 async fn cache_response(
-    response: Response<Body>, response_db_key: [u8; 8], db:&Db
+    response: Response<Body>, response_db_key: [u8; 8], proxy_config: &ProxyConfig, db:&Db
 ) -> Result<Response<Body>, hyper::Error> {
     let (response, response_with_byte_body) = fork_response(response).await?;
 
@@ -204,6 +209,7 @@ async fn cache_response(
             headers: response_with_byte_body.headers(),
             body: response_with_byte_body.body(),
             timestamp: Utc::now().timestamp(),
+            validity: validity_from_response(&response, proxy_config)
         }
     );
     match serialization_result {
@@ -221,6 +227,20 @@ async fn cache_response(
     }
     println!("original and just cached response: {:#?}", response);
     Ok(response)
+}
+
+/// Get `validity` from cache headers or use the default value from `ProxyConfig`.
+fn validity_from_response(response: &Response<Body>, proxy_config: &ProxyConfig) -> u32 {
+    // Try to get the value from `Cache-Control: max-age=<seconds>`,
+    // where `seconds` is `u32`.
+    response
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .and_then(|header_value| header_value.to_str().ok())
+        .and_then(CacheControl::from_value)
+        .and_then(|cache_control| cache_control.max_age)
+        .and_then(|duration| u32::try_from(duration.num_seconds()).ok())
+        .unwrap_or(proxy_config.default_cache_validity)
 }
 
 /// Aka "middleware pipeline".
@@ -362,6 +382,11 @@ fn handle_cache(req: Request<Bytes>, db: &Db) -> Result<Request<Bytes>, Response
             Err(match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
                 // Return the cached response.
                 Ok(cached_response) => {
+                    // Is cached response still valid?
+                    if Utc::now().timestamp() > cached_response.timestamp + i64::from(cached_response.validity) {
+                        return Ok(req)
+                    }
+
                     println!("response has been successfully loaded from the cache");
                     let mut response = Response::new(Body::from(cached_response.body));
                     *response.status_mut() = cached_response.status;
