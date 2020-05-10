@@ -80,7 +80,20 @@ pub struct ProxyConfig {
     /// ```toml
     /// cache_enabled = false
     /// ```
-    pub cache_enabled: bool,
+    pub cache_enabled: bool,    
+    
+    /// If the origin is failing for some reason (returning non-200, timing out),
+    /// the proxy tries to return the cached response, even if it's stale. 
+    ///
+    /// However we shouldn't return too old response - 
+    /// older than the number of seconds defined in `cache_stale_threshold_on_fails`.
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// cache_enabled = false
+    /// ```
+    pub cache_stale_threshold_on_fail: u32,
 
     /// How many seconds to wait for the response from origins.
     ///

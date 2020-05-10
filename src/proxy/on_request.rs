@@ -124,7 +124,7 @@ async fn send_request_and_handle_response(
     match client.request(req).await {
         Ok(response) => {
             if !business::validate_response(&response) {
-                return Ok(handle_origin_fail(req_clone, db))
+                return Ok(handle_origin_fail(req_clone, proxy_config, db))
             }
             if !proxy_config.cache_enabled {
                 println!("original response: {:#?}", response);
@@ -135,13 +135,13 @@ async fn send_request_and_handle_response(
         // Request failed - return the response without caching.
         Err(error) => {
             eprintln!("Request error: {:#?}", error);
-            return Ok(handle_origin_fail(req_clone, db))
+            return Ok(handle_origin_fail(req_clone, proxy_config, db))
         }
     }
 }
 
 /// Request to origin failed (e.g. timeout) or the response is invalid.
-fn handle_origin_fail(req: Request<Bytes>, db: &Db) -> Response<Body> {
+fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) -> Response<Body> {
     let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
 
     match db.get(cache_key.to_db_key()) {
@@ -150,6 +150,12 @@ fn handle_origin_fail(req: Request<Bytes>, db: &Db) -> Response<Body> {
             match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
                 // Return the cached response.
                 Ok(cached_response) => {
+                    if Utc::now().timestamp() - cached_response.timestamp > i64::from(proxy_config.cache_stale_threshold_on_fail) {
+                        let mut response = Response::new(Body::from("No valid response. Cached response too old."));
+                        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                        return response
+                    }
+
                     println!("response has been successfully loaded from the cache");
                     let mut response = Response::new(Body::from(cached_response.body));
                     *response.status_mut() = cached_response.status;

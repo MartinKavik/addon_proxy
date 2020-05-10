@@ -8,6 +8,7 @@ db_directory = "proxy_db"
 ip = "0.0.0.0"
 default_port = 5000
 cache_enabled = false
+cache_stale_threshold_on_fail = 172_800 # 48 * 3600
 timeout = 20
 
 [[routes]]
