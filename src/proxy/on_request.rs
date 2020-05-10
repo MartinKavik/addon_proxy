@@ -18,7 +18,7 @@ use chrono::Utc;
 use cache_control::CacheControl;
 
 use crate::proxy::{ProxyConfig, ScheduleConfigReload, Db};
-use crate::proxy::business;
+use crate::proxy::validations;
 use crate::hyper_helpers::{map_request_body, clone_request, body_to_bytes, bytes_to_body, fork_response};
 
 // ------ CacheKey ------
@@ -128,7 +128,7 @@ async fn send_request_and_handle_response(
     // Send request.
     match client.request(req).await {
         Ok(response) => {
-            if !business::validate_response(&response) {
+            if !validations::validate_response(&response) {
                 return Ok(handle_origin_fail(req_clone, proxy_config, db))
             }
             if !proxy_config.cache_enabled {
@@ -335,7 +335,7 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
     let routed_path_and_query = from.trim_start_matches(&route.from);
 
     // Request validation.
-    if route.validate != Some(false) && !business::validate_request(routed_path_and_query) {
+    if route.validate != Some(false) && !validations::validate_request(routed_path_and_query) {
         let mut response = Response::new(Body::from("Invalid request."));
         *response.status_mut() = StatusCode::BAD_REQUEST;
         return Err(response)

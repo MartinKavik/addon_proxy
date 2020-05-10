@@ -47,9 +47,9 @@ _Notes:_
       Middlewares may invoke side-effects like the cache reloading during their execution.
    1. If the pipeline result is a response, then the response is returned by the proxy server.
    1. If the pipeline result is a request, then the request is sent and 
-      a successful response is cached and returned by the proxy server.
+      a successful valid response is cached and returned by the proxy server.
       
 ### 3. Layer - Business rules
 
-1. The rules extend the second layer - e.g. how long should be responses cached.
-1. WIP
+1. Only business/domain specific rules are set in `validations.rs` 
+   - `validate_request` and `validate_reponse`.
