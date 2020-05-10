@@ -5,6 +5,7 @@ name = "addon_proxy"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "chrono",
  "futures-util",
  "http 0.2.1",
  "http-serde",

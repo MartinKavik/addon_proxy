@@ -6,13 +6,15 @@ use hyper::{Body, Client, Request, Response};
 use hyper::body::Bytes;
 use hyper::client::HttpConnector;
 use hyper_timeout::TimeoutConnector;
-
 use hyper_tls::HttpsConnector;
 
 use http::{StatusCode, Method, Uri, HeaderMap};
 use http_serde;
+
 use serde::{Deserialize, Serialize};
 use bincode;
+use chrono::Utc;
+
 
 use crate::proxy::{ProxyConfig, ScheduleConfigReload, Db};
 use crate::proxy::business;
@@ -52,6 +54,7 @@ struct CacheValueForDeserialization {
     headers: HeaderMap,
     #[serde(with = "serde_bytes")]
     body: Vec<u8>,
+    timestamp: i64,
 }
 
 /// Value for Sled DB.
@@ -63,6 +66,7 @@ struct CacheValueForSerialization<'a> {
     headers: &'a HeaderMap,
     #[serde(with = "serde_bytes")]
     body: &'a [u8],
+    timestamp: i64,
 }
 
 
@@ -138,19 +142,51 @@ async fn send_request_and_handle_response(
 
 /// Request to origin failed (e.g. timeout) or the response is invalid.
 fn handle_origin_fail(req: Request<Bytes>, db: &Db) -> Response<Body> {
-    if let Err(response) = handle_cache(req, db) {
-        // Return cached response or INTERNAL_SERVER_ERROR if something failed (DB or deserialization),
-        return response
-    }
+    let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
 
-    // We weren't able to get a fresh response and there isn't a cached one.
-    let mut response = Response::new(Body::from("No valid response."));
-    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-    response
+    match db.get(cache_key.to_db_key()) {
+        // The cached response has been found.
+        Ok(Some(cached_response)) => {
+            match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
+                // Return the cached response.
+                Ok(cached_response) => {
+                    println!("response has been successfully loaded from the cache");
+                    let mut response = Response::new(Body::from(cached_response.body));
+                    *response.status_mut() = cached_response.status;
+                    *response.headers_mut() = cached_response.headers;
+                    response
+                },
+                // Deserialization failed.
+                Err(error) => {
+                    eprintln!("cannot deserialize a response`: {}", error);
+                    let mut response = Response::new(Body::from("Cannot deserialize a cached response."));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response
+                }
+            }
+        },
+
+        // The cached response hasn't been found.
+        Ok(None) => {
+            // We weren't able to get a fresh response and there isn't a cached one.
+            let mut response = Response::new(Body::from("No valid response."));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        },
+
+        // DB reading failed.
+        Err(error) => {
+            eprintln!("cannot read from DB`: {}", error);
+            let mut response = Response::new(Body::from("Cannot read from the cache."));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        }
+    }
 }
 
-/// Cache response. 
-/// It only logs cache errors because it's not a reason to not deliver response to the user.
+/// Cache response.
+/// 
+/// _Note:_: It only logs cache errors because it's not a reason to not deliver response to the user.
 async fn cache_response(
     response: Response<Body>, response_db_key: [u8; 8], db:&Db
 ) -> Result<Response<Body>, hyper::Error> {
@@ -161,6 +197,7 @@ async fn cache_response(
             status: response_with_byte_body.status(),
             headers: response_with_byte_body.headers(),
             body: response_with_byte_body.body(),
+            timestamp: Utc::now().timestamp(),
         }
     );
     match serialization_result {
