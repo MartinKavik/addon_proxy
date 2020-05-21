@@ -335,7 +335,7 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
     let routed_path_and_query = from.trim_start_matches(&route.from);
 
     // Request validation.
-    if route.validate != Some(false) && !validations::validate_request(routed_path_and_query) {
+    if route.validate != Some(false) && !validations::validate_request(&req, routed_path_and_query) {
         let mut response = Response::new(Body::from("Invalid request."));
         *response.status_mut() = StatusCode::BAD_REQUEST;
         return Err(response)
