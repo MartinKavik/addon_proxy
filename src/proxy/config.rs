@@ -129,6 +129,18 @@ pub struct ProxyConfig {
     /// validate = false
     /// ```
     pub routes: Vec<ProxyRoute>,
+
+    /// If `true`, proxy will call some `println!`s with info about 
+    /// incoming requests, responses, etc. 
+    ///
+    /// It's useful for debugging but it causes a big performance penalty.   
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// verbose = false
+    /// ```
+    pub verbose: bool,
 }
 
 impl ProxyConfig {

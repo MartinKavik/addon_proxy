@@ -87,15 +87,19 @@ pub async fn on_request(
     schedule_config_reload: ScheduleConfigReload,
     db: Db,
 ) -> Result<Response<Body>, hyper::Error> {
-    // println!("proxy config: {:#?}", proxy_config);
-    println!("original req: {:#?}", req);
+    if proxy_config.verbose {
+        println!("original req: {:#?}", req);
+    }
 
     let req = map_request_body(req, body_to_bytes).await?;
 
     let req_or_response = apply_request_middlewares(
         req, &proxy_config, schedule_config_reload, &db
     );
-    println!("mapped req or response: {:#?}", req_or_response);
+
+    if proxy_config.verbose {
+        println!("mapped req or response: {:#?}", req_or_response);
+    }
 
     match req_or_response {
         // A middleware failed or it didn't want to send the given request -
@@ -132,7 +136,9 @@ async fn send_request_and_handle_response(
                 return Ok(handle_origin_fail(req_clone, proxy_config, db))
             }
             if !proxy_config.cache_enabled {
-                println!("original response: {:#?}", response);
+                if proxy_config.verbose {
+                    println!("original response: {:#?}", response);
+                }
                 return Ok(response)
             }
             cache_response(response, response_db_key, proxy_config, db).await
@@ -161,7 +167,10 @@ fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) 
                         return response
                     }
 
-                    println!("response has been successfully loaded from the cache");
+                    if proxy_config.verbose {
+                        println!("response has been successfully loaded from the cache");
+                    }
+
                     let mut response = Response::new(Body::from(cached_response.body));
                     *response.status_mut() = cached_response.status;
                     *response.headers_mut() = cached_response.headers;
@@ -221,11 +230,15 @@ async fn cache_response(
             if let Err(error) = db.insert(response_db_key, cache_value) {
                 eprintln!("cannot cache response with the key: {}", error);
             } else {
-                println!("response has been successfully cached");
+                if proxy_config.verbose {
+                    println!("response has been successfully cached");
+                }
             }
         }
     }
-    println!("original and just cached response: {:#?}", response);
+    if proxy_config.verbose {
+        println!("original and just cached response: {:#?}", response);
+    }
     Ok(response)
 }
 
@@ -255,7 +268,7 @@ fn apply_request_middlewares(
     req = handle_status(req, proxy_config)?;
     req = handle_routes(req, proxy_config)?;
     if proxy_config.cache_enabled {
-        req = handle_cache(req, db)?;
+        req = handle_cache(req, db, proxy_config.verbose)?;
     }
     Ok(req)
 }
@@ -373,7 +386,7 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
 /// - Returns cached response.
 /// - Returns INTERNAL_SERVER_ERROR response when DB reading fails.
 /// - Returns INTERNAL_SERVER_ERROR response when deserialization of a cached response fails.
-fn handle_cache(req: Request<Bytes>, db: &Db) -> Result<Request<Bytes>, Response<Body>> {
+fn handle_cache(req: Request<Bytes>, db: &Db, verbose: bool) -> Result<Request<Bytes>, Response<Body>> {
     let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
 
     match db.get(cache_key.to_db_key()) {
@@ -387,7 +400,10 @@ fn handle_cache(req: Request<Bytes>, db: &Db) -> Result<Request<Bytes>, Response
                         return Ok(req)
                     }
 
-                    println!("response has been successfully loaded from the cache");
+                    if verbose {
+                        println!("response has been successfully loaded from the cache");
+                    }
+
                     let mut response = Response::new(Body::from(cached_response.body));
                     *response.status_mut() = cached_response.status;
                     *response.headers_mut() = cached_response.headers;

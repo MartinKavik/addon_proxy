@@ -4,23 +4,36 @@ version = "0.1.0"
 authors = ["Martin Kavík <martin@kavik.cz>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dev-dependencies]
+criterion = "0.3"
+futures = "0.3.5"
+http-test-server = "2.0.1"
+
+[[bench]]
+name = "proxy_benchmark"
+harness = false
 
 [dependencies]
 bincode = "1.2.1"
 cache_control = "0.1.0"
 chrono = "0.4.11"
-futures-util = "0.3.4"
+futures-util = "0.3.5"
 hyper = "0.13.5"
 hyper-timeout = "0.3.1"
 hyper-tls = "0.4.1"
 http = "0.2.1"
 http-serde = "1.0.1"
-serde = "1.0.106"
+serde = "1.0.110"
 serde_bytes = "0.11.4"
-serde_derive = "1.0.106"
+serde_derive = "1.0.110"
 shadow-clone = "1.2.1"
 sled = "0.31.0"
 stremio-core = { git = "https://github.com/Stremio/stremio-core.git" }
-tokio = { version = "0.2.20", features = [ "macros", "sync", "fs" ] }
+tokio = { version = "0.2.21", features = [ "macros", "sync", "fs" ] }
 toml = "0.5.6"
+
+# Uncomment the code below for maximum speed.
+# [profile.release]
+# lto = true
+# opt-level = 3
+# codegen-units = 1

@@ -1,0 +1,18 @@
+# -- Proxy config --
+# See documentation for struct `ProxyConfig`.
+
+reload_config_url_path = "/reload-proxy-config"
+clear_cache_url_path = "/clear-cache"
+status_url_path = "/status"
+db_directory = "bench_data/proxy_db"
+ip = "0.0.0.0"
+default_port = 5000
+cache_enabled = true
+default_cache_validity = 600  # 10 * 60
+cache_stale_threshold_on_fail = 172_800 # 48 * 60 * 60
+timeout = 20
+verbose = false
+
+[[routes]]
+from = "127.0.0.1:5000/origin"
+to = "http://localhost:5005"

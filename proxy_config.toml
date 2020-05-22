@@ -11,6 +11,11 @@ cache_enabled = false
 default_cache_validity = 600  # 10 * 60
 cache_stale_threshold_on_fail = 172_800 # 48 * 60 * 60
 timeout = 20
+verbose = false
+
+[[routes]]
+from = "127.0.0.1:5000/origin"
+to = "http://localhost:5005"
 
 [[routes]]
 from = "stremio-addon-helloworld.dev"
