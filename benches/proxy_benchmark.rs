@@ -8,7 +8,6 @@ use std::sync::mpsc;
 use criterion::{criterion_group, criterion_main, Criterion, Bencher, BatchSize};
 
 use http_test_server::TestServer;
-use http_test_server::http::{Status, Method};
 
 use hyper::Client;
 use hyper_tls::HttpsConnector;
@@ -29,20 +28,20 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     // @TODO remove old proxy_db/
 
     {
-        start_proxy("bench_data/proxy_cfg_without_cache.toml");
+        start_proxy("bench_data/proxy_cfg_no_cache.toml");
 
         proxy_bench(c, proxy_url, "status", 1000, 1, "/status");
         proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
-        
-        // It runs for cca 15 minutes.
+        // NOTE: It runs for cca 15 minutes.
         // proxy_bench(c, &mut rt, "status_parallel_long", 1_000_000, 1000, proxy_url + "status");
 
         // NOTE: Origin is called through `localhost` => 
         // change the route in TOML config to `127.0.0.1` once the issue is resolved:
         // https://github.com/viniciusgerevini/http-test-server/issues/7
-        proxy_bench(c, proxy_url, "manifest without cache", 100, 1, "/origin/manifest.json");
-
-        // @TODO "top without cache"
+        proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
+        proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
+        proxy_bench(c, proxy_url, "top | no_cache", 100, 1, "/origin/catalog/movie/top.json");
+        proxy_bench(c, proxy_url, "top_parallel | no_cache", 1_000, 100, "/origin/catalog/movie/top.json");
     }
 
     // @TODO with cache
@@ -55,17 +54,10 @@ criterion_group!{
 }
 criterion_main!(benches);
 
-// ------ Mock data ------
-
-const fn manifest_json() -> &'static str {
-    r#"{"id":"org.martinkavik.helloworld_proxy","version":"1.0.0","name":"Hello World Proxy test","description":"Addon to test proxy","resources":["catalog","stream"],"types":["movie","series"],"catalogs":[{"type":"movie","id":"helloworldmovies"},{"type":"series","id":"helloworldseries"}],"idPrefixes":["tt"]}"#
-}
-
 // ------ Start* Helpers ------
 
 fn start_proxy(config_path: &'static str) {
-    // @TODO
-    // let (on_load_sender, on_load_receiver) = mpsc::channel();
+    let (on_start_sender, on_start_receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let proxy = async { 
             Proxy::new(
@@ -78,6 +70,7 @@ fn start_proxy(config_path: &'static str) {
                 on_request
             )
                 .set_config_path(config_path)
+                .set_on_server_start(move || on_start_sender.send(()).expect("send start notification"))
                 .start().await
         };
 
@@ -89,17 +82,22 @@ fn start_proxy(config_path: &'static str) {
 
         rt.block_on(proxy)
     });
+    on_start_receiver.recv().expect("receive start notification");
 }
 
 #[must_use = "TestServer is stopped on drop"]
 fn start_mock_server() -> TestServer {
     let mock_server = TestServer::new_with_port(5005).unwrap();
-    let resource = mock_server.create_resource("/manifest.json");
-    resource
-        .status(Status::OK)
-        .method(Method::GET)
+
+    mock_server
+        .create_resource("/manifest.json")
         .header("Content-Type", "application/json")
-        .body(manifest_json());
+        .body(include_str!("../bench_data/manifest.json"));
+
+    mock_server
+        .create_resource("/catalog/movie/top.json")
+        .header("Content-Type", "application/json")
+        .body(include_str!("../bench_data/top.json"));
 
     mock_server
 }
@@ -169,4 +167,3 @@ async fn create_requests(
         }
     }).take(users).collect::<Vec<_>>()).await;
 }
-
