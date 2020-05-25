@@ -6,11 +6,11 @@ use std::cell::RefCell;
 use std::sync::mpsc;
 use std::path::Path;
 
-use remove_dir_all::remove_dir_all;
-
 use criterion::{criterion_group, criterion_main, Criterion, Bencher, BatchSize};
 
+use remove_dir_all::remove_dir_all;
 use http_test_server::TestServer;
+use separator::Separatable;
 
 use hyper::Client;
 use hyper_tls::HttpsConnector;
@@ -42,7 +42,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
 
         // NOTE: Origin is called through `localhost` => 
-        // change the route in TOML config to `127.0.0.1` once the issue is resolved:
+        // change the route in TOML config to `127.0.0.1` once the issue is resolved to make it faster and more idiomatic:
         // https://github.com/viniciusgerevini/http-test-server/issues/7
         proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
         proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
@@ -142,10 +142,10 @@ fn proxy_bench(c: &mut Criterion, proxy_url: &str, name: &str, num_of_all_reqs: 
 
     println!("_______________________________________________________");
     println!("Bench name ............................... {}", name);
-    println!("Number of all requests per iteration...... {}", num_of_all_reqs);
-    println!("Number of users .......................... {}", num_of_users);
+    println!("Number of all requests per iteration...... {}", num_of_all_reqs.separated_string());
+    println!("Number of users .......................... {}", num_of_users.separated_string());
     println!("Send request & read response avg time .... {:#?}", test_data.0 / test_data.1);
-    println!("Number of all requests ................... {}", test_data.1);
+    println!("Number of all requests ................... {}", test_data.1.separated_string());
     println!("Path ..................................... {}", path);
     println!("_______________________________________________________");
 }

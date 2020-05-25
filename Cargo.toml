@@ -9,6 +9,7 @@ criterion = "0.3.2"
 futures = "0.3.5"
 http-test-server = "2.0.1"
 remove_dir_all = "0.5.2"
+separator = "0.4.1"
 
 [[bench]]
 name = "proxy_benchmark"
@@ -33,8 +34,11 @@ stremio-core = { git = "https://github.com/Stremio/stremio-core.git" }
 tokio = { version = "0.2.21", features = [ "macros", "sync", "fs" ] }
 toml = "0.5.6"
 
-# Uncomment the code below for maximum speed.
-# [profile.release]
-# lto = true
-# opt-level = 3
-# codegen-units = 1
+# The difference between default `release` and the one with extra options is 0-10% 
+# (performance gain is bigger for benches with enabled cache). 
+# However the compilation is much slower when you run `cargo bench` 
+# => default `release` settings should be enough for development/optimizations.
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
