@@ -52,8 +52,8 @@ pub type Db = sled::Db;
 /// - `C` = client connector
 /// - `B` = request body
 /// - `CC` = client creator
-/// - `OR` = `on_request` function
-/// - `ORO` = `on_request` output (aka return value)
+/// - `OR` = `on_request` callback
+/// - `ORO` = `on_request` output (aka callback's return value)
 pub struct Proxy<C, B, CC, OR, ORO> {
     /// Where the TOML file with settings is located.
     pub config_path: PathBuf,
@@ -118,6 +118,7 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     ///
     /// Returns `hyper::Error` when request fails.
     pub on_request: OR,
+    pub on_server_start: Option<Box<dyn FnOnce()>>,
     _phantom: (PhantomData<C>, PhantomData<B>, PhantomData<ORO>),
 }
 
@@ -151,6 +152,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
             config_path: PathBuf::from(DEFAULT_CONFIG_PATH),
             client_creator,
             on_request,
+            on_server_start: None,
             _phantom: (PhantomData, PhantomData, PhantomData)
         }
     }
@@ -178,6 +180,29 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
         self
     }
 
+    /// Provided callback is invoked on server start.
+    ///
+    /// It's useful when you have to make sure the server is running - e.g. in benchmarks.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use ::addon_proxy::{proxy::Proxy, on_request};
+    /// use hyper::Client;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     Proxy::new(Client::new(), on_request)
+    ///         .set_on_server_start(|| println!("Server started!"))
+    ///         .start()
+    ///         .await
+    /// }
+    /// ```
+    pub fn set_on_server_start(&mut self, on_server_start: impl FnOnce() + 'static) -> &mut Self {
+        self.on_server_start = Some(Box::new(on_server_start));
+        self
+    }
+
     /// Start the `Proxy` server.
     ///
     /// # Example
@@ -199,7 +224,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///    - If the database opening failed (e.g. the storage directory cannot be created).
     /// - While the server is running and it's not possible to send items through a channel
     /// (this shouldn't happen in practice).
-    pub async fn start(&self) {
+    pub async fn start(&mut self) {
         let on_request = self.on_request;
         let config_path = self.config_path.clone();
         let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
@@ -269,6 +294,9 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
 
         let server = Server::bind(&addr).serve(make_service);
         println!("Listening on http://{}", addr);
+        if let Some(on_server_start) = self.on_server_start.take() {
+            on_server_start();
+        }
 
         if let Err(e) = server.await {
             if db.flush_async().await.is_err() {
