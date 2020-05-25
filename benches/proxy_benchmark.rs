@@ -4,6 +4,9 @@ use std::time::{Instant, Duration};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::mpsc;
+use std::path::Path;
+
+use remove_dir_all::remove_dir_all;
 
 use criterion::{criterion_group, criterion_main, Criterion, Bencher, BatchSize};
 
@@ -12,8 +15,10 @@ use http_test_server::TestServer;
 use hyper::Client;
 use hyper_tls::HttpsConnector;
 use hyper_timeout::TimeoutConnector;
-use ::addon_proxy::{Proxy, on_request, ProxyController};
+use ::addon_proxy::{Proxy, on_request};
 
+// `Duration` - the sum of all measurements for sending a request and reading the entire response
+// `u32` - the number of all requests
 type TestData = Rc<RefCell<(Duration, u32)>>;
 
 // @TODO add `cargo bench` to README
@@ -25,34 +30,42 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     // NOTE: DNS can be slow, use rather IP.
     let proxy_url = "http://127.0.0.1:5000";   
 
-    // @TODO remove old proxy_db/
+    let proxy_db_path = "bench_data/proxy_db";
+    if Path::new(proxy_db_path).is_dir() {
+        remove_dir_all(proxy_db_path).expect("remove proxy_db directory");
+        println!("{} removed.", proxy_db_path);
+    }
 
     // ------ Cache Disabled ------
 
-    let proxy_controller = start_proxy("bench_data/proxy_cfg_no_cache.toml");
-    proxy_bench(c, proxy_url, "status", 1000, 1, "/status");
-    proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
-    // NOTE: It runs for cca 15 minutes.
-    // proxy_bench(c, &mut rt, "status_parallel_long", 1_000_000, 1000, proxy_url + "status");
+    let proxy_stopper = start_proxy("bench_data/proxy_cfg_no_cache.toml");
+    {
+        proxy_bench(c, proxy_url, "status", 1000, 1, "/status");
+        proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
 
-    // NOTE: Origin is called through `localhost` => 
-    // change the route in TOML config to `127.0.0.1` once the issue is resolved:
-    // https://github.com/viniciusgerevini/http-test-server/issues/7
-    proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
-    proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
-    proxy_bench(c, proxy_url, "top | no_cache", 100, 1, "/origin/catalog/movie/top.json");
-    proxy_bench(c, proxy_url, "top_parallel | no_cache", 1_000, 100, "/origin/catalog/movie/top.json");
-    proxy_controller.stop();
+        // NOTE: Origin is called through `localhost` => 
+        // change the route in TOML config to `127.0.0.1` once the issue is resolved:
+        // https://github.com/viniciusgerevini/http-test-server/issues/7
+        proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
+        proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
+        proxy_bench(c, proxy_url, "top | no_cache", 100, 1, "/origin/catalog/movie/top.json");
+        proxy_bench(c, proxy_url, "top_parallel | no_cache", 1_000, 100, "/origin/catalog/movie/top.json");
+    }
+    proxy_stopper();
 
     // ------ Cache Enabled ------
     
-    let proxy_controller = start_proxy("bench_data/proxy_cfg.toml");
-    // NOTE: First requests are NOT cached.
-    proxy_bench(c, proxy_url, "manifest", 100, 1, "/origin/manifest.json");
-    proxy_bench(c, proxy_url, "manifest_parallel", 1_000, 100, "/origin/manifest.json");
-    proxy_bench(c, proxy_url, "top", 100, 1, "/origin/catalog/movie/top.json");
-    proxy_bench(c, proxy_url, "top_parallel", 1_000, 100, "/origin/catalog/movie/top.json");
-    proxy_controller.stop();
+    let proxy_stopper = start_proxy("bench_data/proxy_cfg.toml");
+    {
+        // NOTE: First requests are NOT cached.
+        proxy_bench(c, proxy_url, "manifest", 100, 1, "/origin/manifest.json");
+        proxy_bench(c, proxy_url, "manifest_parallel", 1_000, 100, "/origin/manifest.json");
+        proxy_bench(c, proxy_url, "top", 100, 1, "/origin/catalog/movie/top.json");
+        proxy_bench(c, proxy_url, "top_parallel", 1_000, 100, "/origin/catalog/movie/top.json");
+        // NOTE: It runs for cca 15 minutes.
+        // proxy_bench(c, proxy_url, "manifest_parallel_long", 1_000_000, 1000, "/origin/manifest.json");
+    }
+    proxy_stopper();
 }
 
 criterion_group!{
@@ -64,8 +77,10 @@ criterion_main!(benches);
 
 // ------ Start* Helpers ------
 
-fn start_proxy(config_path: &'static str) -> ProxyController {
+fn start_proxy(config_path: &'static str) -> impl FnOnce() {
     let (controller_sender, controller_receiver) = mpsc::channel();
+    let (stop_signal_sender, stop_signal_receiver) = mpsc::channel();
+    
     std::thread::spawn(move || {
         let proxy = async { 
             Proxy::new(
@@ -79,6 +94,7 @@ fn start_proxy(config_path: &'static str) -> ProxyController {
             )
                 .set_config_path(config_path)
                 .set_on_server_start(move |controller| controller_sender.send(controller).expect("send proxy controller"))
+                .set_on_server_stop(move || stop_signal_sender.send(()).expect("send stop signal"))
                 .start().await
         };
 
@@ -90,7 +106,12 @@ fn start_proxy(config_path: &'static str) -> ProxyController {
 
         rt.block_on(proxy)
     });
-    controller_receiver.recv().expect("receive proxy ctrl")
+    
+    let controller = controller_receiver.recv().expect("receive proxy ctrl");
+    move || {
+        controller.stop();
+        stop_signal_receiver.recv().expect("receive stop signal");
+    }
 }
 
 #[must_use = "TestServer is stopped on drop"]

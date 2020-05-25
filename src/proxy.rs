@@ -121,8 +121,13 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     pub on_request: OR,
 
     // Callback `on_server_start` is invoked on server start.
+    //
     // You can stop the server by calling `ProxyController::stop`.
     pub on_server_start: Option<Box<dyn FnOnce(ProxyController)>>,
+
+    // Callback `on_server_stop` is invoked when the server has been stopped 
+    /// and all resources have been freed.
+    pub on_server_stop: Option<Box<dyn FnOnce()>>,
 
     _phantom: (PhantomData<C>, PhantomData<B>, PhantomData<ORO>),
 }
@@ -158,6 +163,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
             client_creator,
             on_request,
             on_server_start: None,
+            on_server_stop: None,
             _phantom: (PhantomData, PhantomData, PhantomData)
         }
     }
@@ -205,6 +211,30 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     /// ```
     pub fn set_on_server_start(&mut self, on_server_start: impl FnOnce(ProxyController) + 'static) -> &mut Self {
         self.on_server_start = Some(Box::new(on_server_start));
+        self
+    }
+
+    /// Provided callback is invoked when the server has been stopped 
+    /// and all resources have been freed.
+    ///
+    /// It's useful when you have to make sure the server has been stopped - e.g. in benchmarks.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use ::addon_proxy::{proxy::Proxy, on_request};
+    /// use hyper::Client;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     Proxy::new(Client::new(), on_request)
+    ///         .set_on_server_stop(|| println!("Server has been stopped!"))
+    ///         .start()
+    ///         .await
+    /// }
+    /// ```
+    pub fn set_on_server_stop(&mut self, on_server_stop: impl FnOnce() + 'static) -> &mut Self {
+        self.on_server_stop = Some(Box::new(on_server_stop));
         self
     }
 
@@ -316,6 +346,13 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
         // Save dirty data.
         if let Err(e) = db.flush_async().await {
             eprintln!("database flush error: {}", e);
+        }
+        // Close db & release file locks.
+        drop(db);
+
+        // Notify subscriber that server has been stopped and resources have beed freed.
+        if let Some(on_server_stop) = self.on_server_stop.take() {
+            on_server_stop();
         }
     }
 }

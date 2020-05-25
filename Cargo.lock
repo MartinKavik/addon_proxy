@@ -16,6 +16,7 @@ dependencies = [
  "hyper",
  "hyper-timeout",
  "hyper-tls",
+ "remove_dir_all",
  "serde",
  "serde_bytes",
  "serde_derive",
