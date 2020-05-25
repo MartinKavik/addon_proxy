@@ -38,7 +38,7 @@ pub type Db = sled::Db;
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use ::addon_proxy::{proxy::Proxy, on_request};
 /// use hyper::Client;
 ///
@@ -69,11 +69,11 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     /// It allows you to modify or validate the original request.
     ///
     /// You can return `Response` from the proxied endpoint, e.g.:
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// client.request(req).await
     /// ```
     /// or you can return a custom `Response`, e.g.:
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// Ok(Response::new(Body::from("Proxy config reload scheduled.")))
     /// ```
     ///
@@ -92,7 +92,7 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use std::sync::Arc;
     /// use hyper::{Body, Client, Request, Response};
     /// use hyper::client::HttpConnector;
@@ -148,7 +148,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use ::addon_proxy::{proxy::Proxy, on_request};
     /// use hyper::Client;
     ///
@@ -174,7 +174,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use ::addon_proxy::{proxy::Proxy, on_request};
     /// use hyper::Client;
     ///
@@ -197,7 +197,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use ::addon_proxy::{proxy::Proxy, on_request};
     /// use hyper::Client;
     ///
@@ -221,7 +221,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use ::addon_proxy::{proxy::Proxy, on_request};
     /// use hyper::Client;
     ///
@@ -242,7 +242,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use ::addon_proxy::{proxy::Proxy, on_request};
     /// use hyper::Client;
     ///

@@ -36,8 +36,8 @@ toml = "0.5.6"
 
 # The difference between default `release` and the one with extra options is 0-10% 
 # (performance gain is bigger for benches with enabled cache). 
-# However the compilation is much slower when you run `cargo bench` 
-# => default `release` settings should be enough for development/optimizations.
+# However the compilation is slower when you run `cargo bench` 
+# => default `release` settings should be enough for development or basic optimizations.
 [profile.release]
 lto = true
 opt-level = 3

@@ -22,8 +22,6 @@ use ::addon_proxy::{Proxy, on_request};
 // `Duration` - bench time except setup time
 type TestData = Rc<RefCell<(Duration, u32, Duration)>>;
 
-// @TODO add `cargo bench` and `cargo make verify` to README
-
 pub fn criterion_benchmark(c: &mut Criterion) {
     let _mock_server = start_mock_server();
     // NOTE: DNS can be slow, use rather IP.
