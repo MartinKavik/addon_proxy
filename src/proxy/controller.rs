@@ -1,4 +1,5 @@
 use tokio::sync::oneshot;
+#[allow(clippy::module_name_repetitions)]
 pub struct ProxyController {
     pub(crate) shutdown_sender: oneshot::Sender<()>,
 }

@@ -13,7 +13,6 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task;
 
 use shadow_clone::shadow_clone;
-use sled;
 
 mod config;
 mod controller;

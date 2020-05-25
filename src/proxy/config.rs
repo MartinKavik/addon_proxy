@@ -3,11 +3,11 @@ use serde_derive::Deserialize;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use toml;
 
 // ------ ProxyConfig ------
 
 /// Proxy configuration loaded from the TOML file.
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct ProxyConfig {
     /// Send a request with this url path to schedule reload of this configuration.

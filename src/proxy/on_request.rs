@@ -10,9 +10,7 @@ use hyper_timeout::TimeoutConnector;
 use hyper_tls::HttpsConnector;
 
 use http::{HeaderMap, Method, StatusCode, Uri};
-use http_serde;
 
-use bincode;
 use cache_control::CacheControl;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -148,7 +146,7 @@ async fn send_request_and_handle_response(
         // Request failed - return the response without caching.
         Err(error) => {
             eprintln!("Request error: {:#?}", error);
-            return Ok(handle_origin_fail(req_clone, proxy_config, db));
+            Ok(handle_origin_fail(req_clone, proxy_config, db))
         }
     }
 }
@@ -241,10 +239,8 @@ async fn cache_response(
             // Try to cache the response.
             if let Err(error) = db.insert(response_db_key, cache_value) {
                 eprintln!("cannot cache response with the key: {}", error);
-            } else {
-                if proxy_config.verbose {
-                    println!("response has been successfully cached");
-                }
+            } else if proxy_config.verbose {
+                println!("response has been successfully cached");
             }
         }
     }
