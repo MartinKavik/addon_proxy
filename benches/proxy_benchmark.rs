@@ -19,7 +19,8 @@ use ::addon_proxy::{Proxy, on_request};
 
 // `Duration` - the sum of all measurements for sending a request and reading the entire response
 // `u32` - the number of all requests
-type TestData = Rc<RefCell<(Duration, u32)>>;
+// `Duration` - bench time except setup time
+type TestData = Rc<RefCell<(Duration, u32, Duration)>>;
 
 // @TODO add `cargo bench` and `cargo make verify` to README
 
@@ -132,7 +133,7 @@ fn start_mock_server() -> TestServer {
 // ------ Bench Helpers ------
 
 fn proxy_bench(c: &mut Criterion, proxy_url: &str, name: &str, num_of_all_reqs: usize, num_of_users: usize, path: &str) {
-    let test_data = Rc::new(RefCell::new((Duration::default(), 0)));
+    let test_data = Rc::new(RefCell::new((Duration::default(), 0, Duration::default())));
 
     c.bench_function(name, |b| bench_requests(
         b, num_of_all_reqs, num_of_users, &format!("{}{}", proxy_url, path), &test_data)
@@ -140,12 +141,15 @@ fn proxy_bench(c: &mut Criterion, proxy_url: &str, name: &str, num_of_all_reqs: 
     
     let test_data = test_data.borrow();
 
+    let rps = Duration::new(1, 0).as_nanos() / (test_data.2 / test_data.1).as_nanos();
     println!("_______________________________________________________");
     println!("Bench name ............................... {}", name);
     println!("Number of all requests per iteration...... {}", num_of_all_reqs.separated_string());
     println!("Number of users .......................... {}", num_of_users.separated_string());
     println!("Send request & read response avg time .... {:#?}", test_data.0 / test_data.1);
+    println!("Requests & readings per second ........... {}", rps.separated_string());
     println!("Number of all requests ................... {}", test_data.1.separated_string());
+    println!("Bench time ............................... {:#?}", test_data.2);
     println!("Path ..................................... {}", path);
     println!("_______________________________________________________");
 }
@@ -173,9 +177,11 @@ async fn create_requests(
     num_of_all_requests: usize, 
     users: usize,
     test_data: &TestData,
-) -> () {
+) {
     let url: hyper::Uri = url.parse().expect("parsed url");
     let sequence_length = num_of_all_requests / users; 
+
+    let now_for_bench_time = Instant::now();
 
     join_all(iter::repeat_with(|| {
         async {
@@ -193,4 +199,6 @@ async fn create_requests(
             }
         }
     }).take(users).collect::<Vec<_>>()).await;
+
+    test_data.borrow_mut().2 += now_for_bench_time.elapsed();
 }
