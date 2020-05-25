@@ -21,9 +21,7 @@ use ::addon_proxy::{Proxy, on_request};
 // `u32` - the number of all requests
 type TestData = Rc<RefCell<(Duration, u32)>>;
 
-// @TODO add `cargo bench` to README
-
-// @TODO `cargo make verify`
+// @TODO add `cargo bench` and `cargo make verify` to README
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let _mock_server = start_mock_server();
