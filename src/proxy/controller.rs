@@ -1,6 +1,6 @@
 use tokio::sync::oneshot;
 pub struct ProxyController {
-    pub(crate) shutdown_sender: oneshot::Sender<()>
+    pub(crate) shutdown_sender: oneshot::Sender<()>,
 }
 
 impl ProxyController {

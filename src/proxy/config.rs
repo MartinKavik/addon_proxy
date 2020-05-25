@@ -1,9 +1,9 @@
+use http::Uri;
+use serde_derive::Deserialize;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use serde_derive::Deserialize;
-use toml;
 use tokio::fs;
-use http::Uri;
+use toml;
 
 // ------ ProxyConfig ------
 
@@ -80,8 +80,8 @@ pub struct ProxyConfig {
     /// ```toml
     /// cache_enabled = false
     /// ```
-    pub cache_enabled: bool,        
-    
+    pub cache_enabled: bool,
+
     /// How many seconds is a cached response valid,
     /// if its validity isn't explicitly defined by its response headers.
     ///
@@ -90,12 +90,12 @@ pub struct ProxyConfig {
     /// ```toml
     /// default_cache_validity = 600  # 10 * 60
     /// ```
-    pub default_cache_validity: u32,    
-    
+    pub default_cache_validity: u32,
+
     /// If the origin is failing for some reason (returning non-200, timing out),
-    /// the proxy tries to return the cached response, even if it's stale. 
+    /// the proxy tries to return the cached response, even if it's stale.
     ///
-    /// However we shouldn't return too old response - 
+    /// However we shouldn't return too old response -
     /// older than the number of seconds defined in `cache_stale_threshold_on_fails`.
     ///
     /// # Example (TOML)
@@ -130,8 +130,8 @@ pub struct ProxyConfig {
     /// ```
     pub routes: Vec<ProxyRoute>,
 
-    /// If `true`, proxy will call some `println!`s with info about 
-    /// incoming requests, responses, etc. 
+    /// If `true`, proxy will call some `println!`s with info about
+    /// incoming requests, responses, etc.
     ///
     /// It's useful for debugging but it causes a big performance penalty.   
     ///
@@ -146,7 +146,9 @@ pub struct ProxyConfig {
 impl ProxyConfig {
     /// Read configuration from the TOML file and try to parse it into `ProxyConfig`.
     pub async fn load(path: impl AsRef<Path>) -> Result<ProxyConfig, String> {
-        let config = fs::read_to_string(path).await.map_err(|err| err.to_string())?;
+        let config = fs::read_to_string(path)
+            .await
+            .map_err(|err| err.to_string())?;
         toml::from_str(&config).map_err(|err| err.to_string())
     }
 }
@@ -174,4 +176,3 @@ pub struct ProxyRoute {
     pub to: Uri,
     pub validate: Option<bool>,
 }
-

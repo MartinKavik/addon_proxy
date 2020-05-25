@@ -1,19 +1,19 @@
 use std::convert::Infallible;
-use std::future::Future;
-use std::sync::Arc;
-use std::marker::PhantomData;
-use std::path::PathBuf;
 use std::env;
+use std::future::Future;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
 
-use tokio::sync::{mpsc, watch, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task;
 
-use sled;
 use shadow_clone::shadow_clone;
+use sled;
 
 mod config;
 mod controller;
@@ -125,7 +125,7 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     // You can stop the server by calling `ProxyController::stop`.
     pub on_server_start: Option<Box<dyn FnOnce(ProxyController)>>,
 
-    // Callback `on_server_stop` is invoked when the server has been stopped 
+    // Callback `on_server_stop` is invoked when the server has been stopped
     /// and all resources have been freed.
     pub on_server_stop: Option<Box<dyn FnOnce()>>,
 
@@ -133,12 +133,16 @@ pub struct Proxy<C, B, CC, OR, ORO> {
 }
 
 impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
-    where
-        C: Send + Sync + 'static,
-        B: Send + 'static,
-        CC: Fn(&ProxyConfig) -> Client<C, B>,
-        ORO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
-        OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, ScheduleConfigReload, Db) -> ORO + Send + Sync + Copy + 'static,
+where
+    C: Send + Sync + 'static,
+    B: Send + 'static,
+    CC: Fn(&ProxyConfig) -> Client<C, B>,
+    ORO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
+    OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, ScheduleConfigReload, Db) -> ORO
+        + Send
+        + Sync
+        + Copy
+        + 'static,
 {
     /// Create a new `Proxy` instance.
     ///
@@ -164,7 +168,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
             on_request,
             on_server_start: None,
             on_server_stop: None,
-            _phantom: (PhantomData, PhantomData, PhantomData)
+            _phantom: (PhantomData, PhantomData, PhantomData),
         }
     }
 
@@ -209,12 +213,15 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     ///         .await
     /// }
     /// ```
-    pub fn set_on_server_start(&mut self, on_server_start: impl FnOnce(ProxyController) + 'static) -> &mut Self {
+    pub fn set_on_server_start(
+        &mut self,
+        on_server_start: impl FnOnce(ProxyController) + 'static,
+    ) -> &mut Self {
         self.on_server_start = Some(Box::new(on_server_start));
         self
     }
 
-    /// Provided callback is invoked when the server has been stopped 
+    /// Provided callback is invoked when the server has been stopped
     /// and all resources have been freed.
     ///
     /// It's useful when you have to make sure the server has been stopped - e.g. in benchmarks.
@@ -262,11 +269,15 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     pub async fn start(&mut self) {
         let on_request = self.on_request;
         let config_path = self.config_path.clone();
-        let proxy_config = ProxyConfig::load(&config_path).await.expect("load proxy config");
+        let proxy_config = ProxyConfig::load(&config_path)
+            .await
+            .expect("load proxy config");
         let client = Arc::new((&self.client_creator)(&proxy_config));
         let addr = SocketAddr::new(
             proxy_config.ip,
-            env::var("PORT").ok().and_then(|port| port.parse().ok())
+            env::var("PORT")
+                .ok()
+                .and_then(|port| port.parse().ok())
                 .unwrap_or(proxy_config.default_port),
         );
         // All operations in sled are thread-safe.
@@ -286,17 +297,22 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
             while let Some(_) = config_reload_receiver.recv().await {
                 match ProxyConfig::load(&config_path).await {
                     Ok(proxy_config) => {
-                        config_sender.broadcast(Arc::new(proxy_config)).expect("broadcast reloaded config");
+                        config_sender
+                            .broadcast(Arc::new(proxy_config))
+                            .expect("broadcast reloaded config");
                         println!("proxy config reloaded");
-                    },
-                    Err(err) => eprintln!("cannot reload proxy config: {}", err)
+                    }
+                    Err(err) => eprintln!("cannot reload proxy config: {}", err),
                 }
             }
         });
 
         // `schedule_config_reload` will be passed to all `on_request` callbacks.
         let schedule_config_reload = Arc::new(move || {
-            config_reload_sender.clone().send(()).expect("schedule proxy config reload");
+            config_reload_sender
+                .clone()
+                .send(())
+                .expect("schedule proxy config reload");
         });
 
         // The request service. It's usually bound to a single connection.
@@ -312,7 +328,8 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
                         config_receiver.recv().await.expect("receive proxy config"),
                         schedule_config_reload,
                         db,
-                    ).await
+                    )
+                    .await
                 }
             }
         });
@@ -322,9 +339,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
         // This is what a `make_service_fn` does.
         let make_service = make_service_fn(move |_| {
             shadow_clone!(service);
-            async move {
-                Ok::<_, Infallible>(service)
-            }
+            async move { Ok::<_, Infallible>(service) }
         });
 
         let server = Server::bind(&addr).serve(make_service);
@@ -332,7 +347,9 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
 
         // Prepare controller with ability to gracefully shutdown the server.
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let server = server.with_graceful_shutdown(async { shutdown_receiver.await.ok(); });
+        let server = server.with_graceful_shutdown(async {
+            shutdown_receiver.await.ok();
+        });
 
         if let Some(on_server_start) = self.on_server_start.take() {
             on_server_start(ProxyController { shutdown_sender });

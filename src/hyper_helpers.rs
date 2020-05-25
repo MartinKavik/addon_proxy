@@ -1,6 +1,6 @@
-use hyper::{Body, Request, Response};
-use hyper::body::Bytes;
 use futures_util::future::Future;
+use hyper::body::Bytes;
+use hyper::{Body, Request, Response};
 
 /// Convert `Request/Response` body from `Body` to `Bytes`.
 ///
@@ -19,10 +19,13 @@ pub async fn bytes_to_body(bytes: Bytes) -> Result<Body, hyper::Error> {
 /// Map `Request` body.
 ///
 /// Standard `Body` is a `Stream` so this function is `async` to allow to aggregate `Stream` to vectors.
-pub async fn map_request_body<T, U, F, FO>(req: Request<T>, mapper: F) -> Result<Request<U>, hyper::Error>
-    where
-        FO: Future<Output = Result<U, hyper::Error>>,
-        F: FnOnce(T) -> FO
+pub async fn map_request_body<T, U, F, FO>(
+    req: Request<T>,
+    mapper: F,
+) -> Result<Request<U>, hyper::Error>
+where
+    FO: Future<Output = Result<U, hyper::Error>>,
+    F: FnOnce(T) -> FO,
 {
     let (parts, body) = req.into_parts();
     let mapped_body = mapper(body).await?;
@@ -32,10 +35,13 @@ pub async fn map_request_body<T, U, F, FO>(req: Request<T>, mapper: F) -> Result
 /// Map `Response` body.
 ///
 /// Standard `Body` is a `Stream` so this function is `async` to allow to aggregate `Stream` to vectors.
-pub async fn map_response_body<T, U, F, FO>(req: Response<T>, mapper: F) -> Result<Response<U>, hyper::Error>
-    where
-        FO: Future<Output = Result<U, hyper::Error>>,
-        F: FnOnce(T) -> FO
+pub async fn map_response_body<T, U, F, FO>(
+    req: Response<T>,
+    mapper: F,
+) -> Result<Response<U>, hyper::Error>
+where
+    FO: Future<Output = Result<U, hyper::Error>>,
+    F: FnOnce(T) -> FO,
 {
     let (parts, body) = req.into_parts();
     let mapped_body = mapper(body).await?;
@@ -68,17 +74,13 @@ pub fn clone_response<T: Clone>(response: &Response<T>) -> Response<T> {
 
 /// Consumes `Response<Body>` and returns result with the original `Response<Body>`
 /// and cloned `Response<Bytes>`.
-pub async fn fork_response(response: Response<Body>)
-    -> Result<(Response<Body>, Response<Bytes>), hyper::Error>
-{
+pub async fn fork_response(
+    response: Response<Body>,
+) -> Result<(Response<Body>, Response<Bytes>), hyper::Error> {
     // We need to convert the body to bytes to clone the response.
-    let response_with_byte_body = map_response_body(
-        response, body_to_bytes
-    ).await?;
+    let response_with_byte_body = map_response_body(response, body_to_bytes).await?;
     // And then clone it and convert back to `Body` so we can return it.
-    let response = map_response_body(
-        clone_response(&response_with_byte_body),
-        bytes_to_body
-    ).await?;
+    let response =
+        map_response_body(clone_response(&response_with_byte_body), bytes_to_body).await?;
     Ok((response, response_with_byte_body))
 }

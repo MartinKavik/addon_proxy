@@ -1,25 +1,27 @@
-use std::sync::Arc;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::convert::TryFrom;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
-use hyper::{Body, Client, Request, Response, header};
 use hyper::body::Bytes;
 use hyper::client::HttpConnector;
+use hyper::{header, Body, Client, Request, Response};
 use hyper_timeout::TimeoutConnector;
 use hyper_tls::HttpsConnector;
 
-use http::{StatusCode, Method, Uri, HeaderMap};
+use http::{HeaderMap, Method, StatusCode, Uri};
 use http_serde;
 
-use serde::{Deserialize, Serialize};
 use bincode;
-use chrono::Utc;
 use cache_control::CacheControl;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
-use crate::proxy::{ProxyConfig, ScheduleConfigReload, Db};
+use crate::hyper_helpers::{
+    body_to_bytes, bytes_to_body, clone_request, fork_response, map_request_body,
+};
 use crate::proxy::validations;
-use crate::hyper_helpers::{map_request_body, clone_request, body_to_bytes, bytes_to_body, fork_response};
+use crate::proxy::{Db, ProxyConfig, ScheduleConfigReload};
 
 // ------ CacheKey ------
 
@@ -74,7 +76,6 @@ struct CacheValueForSerialization<'a> {
     validity: u32,
 }
 
-
 // ------ on_request ------
 
 type OnRequestClient = Arc<Client<TimeoutConnector<HttpsConnector<HttpConnector>>>>;
@@ -93,9 +94,8 @@ pub async fn on_request(
 
     let req = map_request_body(req, body_to_bytes).await?;
 
-    let req_or_response = apply_request_middlewares(
-        req, &proxy_config, schedule_config_reload, &db
-    );
+    let req_or_response =
+        apply_request_middlewares(req, &proxy_config, schedule_config_reload, &db);
 
     if proxy_config.verbose {
         println!("mapped req or response: {:#?}", req_or_response);
@@ -106,21 +106,23 @@ pub async fn on_request(
         // just return prepared `Response`.
         Err(response) => Ok(response),
         // Send the modified request.
-        Ok(req) => {
-            send_request_and_handle_response(req, &client, &proxy_config, &db).await
-        },
+        Ok(req) => send_request_and_handle_response(req, &client, &proxy_config, &db).await,
     }
 }
 
 /// Send the request to origin and handle request fails and origin response.
 async fn send_request_and_handle_response(
-    req: Request<Bytes>, 
-    client: &OnRequestClient, 
-    proxy_config: &ProxyConfig, 
-    db: &Db
+    req: Request<Bytes>,
+    client: &OnRequestClient,
+    proxy_config: &ProxyConfig,
+    db: &Db,
 ) -> Result<Response<Body>, hyper::Error> {
-    let response_db_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()}
-        .to_db_key();
+    let response_db_key = CacheKey {
+        method: req.method(),
+        uri: req.uri(),
+        body: req.body(),
+    }
+    .to_db_key();
 
     // We need to clone the request so we can use it later, when the request or response fails,
     // so we can try to get at least cached response.
@@ -133,27 +135,31 @@ async fn send_request_and_handle_response(
     match client.request(req).await {
         Ok(response) => {
             if !validations::validate_response(&response) {
-                return Ok(handle_origin_fail(req_clone, proxy_config, db))
+                return Ok(handle_origin_fail(req_clone, proxy_config, db));
             }
             if !proxy_config.cache_enabled {
                 if proxy_config.verbose {
                     println!("original response: {:#?}", response);
                 }
-                return Ok(response)
+                return Ok(response);
             }
             cache_response(response, response_db_key, proxy_config, db).await
-        },
+        }
         // Request failed - return the response without caching.
         Err(error) => {
             eprintln!("Request error: {:#?}", error);
-            return Ok(handle_origin_fail(req_clone, proxy_config, db))
+            return Ok(handle_origin_fail(req_clone, proxy_config, db));
         }
     }
 }
 
 /// Request to origin failed (e.g. timeout) or the response is invalid.
 fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) -> Response<Body> {
-    let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
+    let cache_key = CacheKey {
+        method: req.method(),
+        uri: req.uri(),
+        body: req.body(),
+    };
 
     match db.get(cache_key.to_db_key()) {
         // The cached response has been found.
@@ -161,10 +167,14 @@ fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) 
             match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
                 // Return the cached response.
                 Ok(cached_response) => {
-                    if Utc::now().timestamp() - cached_response.timestamp > i64::from(proxy_config.cache_stale_threshold_on_fail) {
-                        let mut response = Response::new(Body::from("No valid response. Cached response too old."));
+                    if Utc::now().timestamp() - cached_response.timestamp
+                        > i64::from(proxy_config.cache_stale_threshold_on_fail)
+                    {
+                        let mut response = Response::new(Body::from(
+                            "No valid response. Cached response too old.",
+                        ));
                         *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                        return response
+                        return response;
                     }
 
                     if proxy_config.verbose {
@@ -175,16 +185,17 @@ fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) 
                     *response.status_mut() = cached_response.status;
                     *response.headers_mut() = cached_response.headers;
                     response
-                },
+                }
                 // Deserialization failed.
                 Err(error) => {
                     eprintln!("cannot deserialize a response`: {}", error);
-                    let mut response = Response::new(Body::from("Cannot deserialize a cached response."));
+                    let mut response =
+                        Response::new(Body::from("Cannot deserialize a cached response."));
                     *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                     response
                 }
             }
-        },
+        }
 
         // The cached response hasn't been found.
         Ok(None) => {
@@ -192,7 +203,7 @@ fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) 
             let mut response = Response::new(Body::from("No valid response."));
             *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             response
-        },
+        }
 
         // DB reading failed.
         Err(error) => {
@@ -205,22 +216,23 @@ fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) 
 }
 
 /// Cache response.
-/// 
+///
 /// _Note:_: It only logs cache errors because it's not a reason to not deliver response to the user.
 async fn cache_response(
-    response: Response<Body>, response_db_key: [u8; 8], proxy_config: &ProxyConfig, db:&Db
+    response: Response<Body>,
+    response_db_key: [u8; 8],
+    proxy_config: &ProxyConfig,
+    db: &Db,
 ) -> Result<Response<Body>, hyper::Error> {
     let (response, response_with_byte_body) = fork_response(response).await?;
 
-    let serialization_result = bincode::serialize(
-        &CacheValueForSerialization {
-            status: response_with_byte_body.status(),
-            headers: response_with_byte_body.headers(),
-            body: response_with_byte_body.body(),
-            timestamp: Utc::now().timestamp(),
-            validity: validity_from_response(&response, proxy_config)
-        }
-    );
+    let serialization_result = bincode::serialize(&CacheValueForSerialization {
+        status: response_with_byte_body.status(),
+        headers: response_with_byte_body.headers(),
+        body: response_with_byte_body.body(),
+        timestamp: Utc::now().timestamp(),
+        validity: validity_from_response(&response, proxy_config),
+    });
     match serialization_result {
         Err(error) => {
             eprintln!("cannot serialize response: {}", error);
@@ -277,11 +289,11 @@ fn apply_request_middlewares(
 fn handle_config_reload(
     req: Request<Bytes>,
     proxy_config: &ProxyConfig,
-    schedule_config_reload: ScheduleConfigReload
+    schedule_config_reload: ScheduleConfigReload,
 ) -> Result<Request<Bytes>, Response<Body>> {
     if req.uri().path() == proxy_config.reload_config_url_path {
         schedule_config_reload();
-        return Err(Response::new(Body::from("Proxy config reload scheduled.")))
+        return Err(Response::new(Body::from("Proxy config reload scheduled.")));
     }
     Ok(req)
 }
@@ -290,14 +302,14 @@ fn handle_config_reload(
 fn handle_clear_cache(
     req: Request<Bytes>,
     proxy_config: &ProxyConfig,
-    db: &Db
+    db: &Db,
 ) -> Result<Request<Bytes>, Response<Body>> {
     if req.uri().path() == proxy_config.clear_cache_url_path {
         if let Err(error) = db.clear() {
             eprintln!("cache clearing failed: {}", error);
-            return Err(Response::new(Body::from("Cache clearing failed.")))
+            return Err(Response::new(Body::from("Cache clearing failed.")));
         }
-        return Err(Response::new(Body::from("Cache cleared.")))
+        return Err(Response::new(Body::from("Cache cleared.")));
     }
     Ok(req)
 }
@@ -308,7 +320,7 @@ fn handle_status(
     proxy_config: &ProxyConfig,
 ) -> Result<Request<Bytes>, Response<Body>> {
     if req.uri().path() == proxy_config.status_url_path {
-        return Err(Response::new(Body::from("Proxy is ready.")))
+        return Err(Response::new(Body::from("Proxy is ready.")));
     }
     Ok(req)
 }
@@ -320,26 +332,35 @@ fn handle_status(
 /// - Returns 200 and the content of `landing.html` when the incoming request does not match any routes.
 /// - Returns BAD_REQUEST when request validation fails.
 /// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
-fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<Request<Bytes>, Response<Body>> {
+fn handle_routes(
+    mut req: Request<Bytes>,
+    proxy_config: &ProxyConfig,
+) -> Result<Request<Bytes>, Response<Body>> {
     let uri = req.uri();
     // Try to get the host directly from `req.uri`, then from `host` header and then represent it as relative url.
-    let host = uri.host()
-        .or_else(|| req.headers().get("host").and_then(|value| value.to_str().ok()))
+    let host = uri
+        .host()
+        .or_else(|| {
+            req.headers()
+                .get("host")
+                .and_then(|value| value.to_str().ok())
+        })
         .unwrap_or_default();
 
     // http://example.com/abc/efg?x=1&y=2 -> example.com/abc/efg?x=1&y=2
     let from = format!("{}{}{}", host, uri.path(), uri.query().unwrap_or_default());
 
     // Get the first matching route or return a landing file.
-    let route = proxy_config.routes.iter().find(|route| {
-        from.starts_with(&route.from)
-    });
+    let route = proxy_config
+        .routes
+        .iter()
+        .find(|route| from.starts_with(&route.from));
     let route = match route {
         Some(route) => route,
         None => {
             // Return `landing.html`.
             let response = Response::new(Body::from(include_bytes!("../../landing.html").as_ref()));
-            return Err(response)
+            return Err(response);
         }
     };
 
@@ -348,21 +369,28 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
     let routed_path_and_query = from.trim_start_matches(&route.from);
 
     // Request validation.
-    if route.validate != Some(false) && !validations::validate_request(&req, routed_path_and_query) {
+    if route.validate != Some(false) && !validations::validate_request(&req, routed_path_and_query)
+    {
         let mut response = Response::new(Body::from("Invalid request."));
         *response.status_mut() = StatusCode::BAD_REQUEST;
-        return Err(response)
+        return Err(response);
     }
 
     // @TODO: Replace `trim_start_matches` with `strip_prefix` once stable.
     // /abc/efg?x=1&y=2 -> http://localhost:8000/abc/efgx=1&y=2 (if matching route's `to` is "http://localhost:8000")
-    *req.uri_mut() = match format!("{}{}", route.to, routed_path_and_query.trim_start_matches("/")).parse() {
+    *req.uri_mut() = match format!(
+        "{}{}",
+        route.to,
+        routed_path_and_query.trim_start_matches("/")
+    )
+    .parse()
+    {
         Ok(uri) => uri,
         Err(error) => {
             eprintln!("Invalid URI in `handle_routes`: {}", error);
             let mut response = Response::new(Body::from("Cannot route to invalid URI."));
             *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            return Err(response)
+            return Err(response);
         }
     };
 
@@ -373,7 +401,7 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
             eprintln!("Missing host in the request uri: {}", req.uri());
             let mut response = Response::new(Body::from("Cannot route to URI without host."));
             *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            return Err(response)
+            return Err(response);
         }
     };
 
@@ -386,38 +414,52 @@ fn handle_routes(mut req: Request<Bytes>, proxy_config: &ProxyConfig) -> Result<
 /// - Returns cached response.
 /// - Returns INTERNAL_SERVER_ERROR response when DB reading fails.
 /// - Returns INTERNAL_SERVER_ERROR response when deserialization of a cached response fails.
-fn handle_cache(req: Request<Bytes>, db: &Db, verbose: bool) -> Result<Request<Bytes>, Response<Body>> {
-    let cache_key = CacheKey { method: req.method(), uri: req.uri(), body: req.body()};
+fn handle_cache(
+    req: Request<Bytes>,
+    db: &Db,
+    verbose: bool,
+) -> Result<Request<Bytes>, Response<Body>> {
+    let cache_key = CacheKey {
+        method: req.method(),
+        uri: req.uri(),
+        body: req.body(),
+    };
 
     match db.get(cache_key.to_db_key()) {
         // The cached response has been found.
         Ok(Some(cached_response)) => {
-            Err(match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
-                // Return the cached response.
-                Ok(cached_response) => {
-                    // Is cached response still valid?
-                    if Utc::now().timestamp() > cached_response.timestamp + i64::from(cached_response.validity) {
-                        return Ok(req)
-                    }
+            Err(
+                match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref())
+                {
+                    // Return the cached response.
+                    Ok(cached_response) => {
+                        // Is cached response still valid?
+                        if Utc::now().timestamp()
+                            > cached_response.timestamp + i64::from(cached_response.validity)
+                        {
+                            return Ok(req);
+                        }
 
-                    if verbose {
-                        println!("response has been successfully loaded from the cache");
-                    }
+                        if verbose {
+                            println!("response has been successfully loaded from the cache");
+                        }
 
-                    let mut response = Response::new(Body::from(cached_response.body));
-                    *response.status_mut() = cached_response.status;
-                    *response.headers_mut() = cached_response.headers;
-                    response
+                        let mut response = Response::new(Body::from(cached_response.body));
+                        *response.status_mut() = cached_response.status;
+                        *response.headers_mut() = cached_response.headers;
+                        response
+                    }
+                    // Deserialization failed.
+                    Err(error) => {
+                        eprintln!("Cannot deserialize a response`: {}", error);
+                        let mut response =
+                            Response::new(Body::from("Cannot deserialize a cached response."));
+                        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                        response
+                    }
                 },
-                // Deserialization failed.
-                Err(error) => {
-                    eprintln!("Cannot deserialize a response`: {}", error);
-                    let mut response = Response::new(Body::from("Cannot deserialize a cached response."));
-                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                    response
-                }
-            })
-        },
+            )
+        }
 
         // The cached response hasn't been found => just return `req` without any changes.
         Ok(None) => Ok(req),
@@ -431,6 +473,3 @@ fn handle_cache(req: Request<Bytes>, db: &Db, verbose: bool) -> Result<Request<B
         }
     }
 }
-
-
-

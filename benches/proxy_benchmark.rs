@@ -1,27 +1,28 @@
 use futures::future::join_all;
-use std::iter;
-use std::time::{Instant, Duration};
-use std::rc::Rc;
 use std::cell::RefCell;
-use std::sync::mpsc;
+use std::iter;
 use std::path::Path;
+use std::rc::Rc;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
-use criterion::{criterion_group, criterion_main, Criterion, Bencher, BatchSize};
+use criterion::{criterion_group, criterion_main, BatchSize, Bencher, Criterion};
 
-use remove_dir_all::remove_dir_all;
 use http_test_server::TestServer;
+use remove_dir_all::remove_dir_all;
 use separator::Separatable;
 
+use ::addon_proxy::{on_request, Proxy};
 use hyper::Client;
-use hyper_tls::HttpsConnector;
 use hyper_timeout::TimeoutConnector;
-use ::addon_proxy::{Proxy, on_request};
+use hyper_tls::HttpsConnector;
 
 // `Duration` - the sum of all measurements for sending a request and reading the entire response
 // `u32` - the number of all requests
 // `Duration` - bench time except setup time
 type TestData = Rc<RefCell<(Duration, u32, Duration)>>;
 
+#[rustfmt::skip]
 pub fn criterion_benchmark(c: &mut Criterion) {
     let _mock_server = start_mock_server();
     // NOTE: DNS can be slow, use rather IP.
@@ -65,7 +66,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     proxy_stopper();
 }
 
-criterion_group!{
+criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(10).warm_up_time(Duration::new(1, 0));
     targets = criterion_benchmark
@@ -77,22 +78,29 @@ criterion_main!(benches);
 fn start_proxy(config_path: &'static str) -> impl FnOnce() {
     let (controller_sender, controller_receiver) = mpsc::channel();
     let (stop_signal_sender, stop_signal_receiver) = mpsc::channel();
-    
+
     std::thread::spawn(move || {
-        let proxy = async { 
+        let proxy = async {
             Proxy::new(
                 |proxy_config| {
                     let https = HttpsConnector::new();
                     let mut connector = TimeoutConnector::new(https);
-                    connector.set_read_timeout(Some(Duration::from_secs(u64::from(proxy_config.timeout))));
+                    connector.set_read_timeout(Some(Duration::from_secs(u64::from(
+                        proxy_config.timeout,
+                    ))));
                     Client::builder().build(connector)
                 },
-                on_request
+                on_request,
             )
-                .set_config_path(config_path)
-                .set_on_server_start(move |controller| controller_sender.send(controller).expect("send proxy controller"))
-                .set_on_server_stop(move || stop_signal_sender.send(()).expect("send stop signal"))
-                .start().await
+            .set_config_path(config_path)
+            .set_on_server_start(move |controller| {
+                controller_sender
+                    .send(controller)
+                    .expect("send proxy controller")
+            })
+            .set_on_server_stop(move || stop_signal_sender.send(()).expect("send stop signal"))
+            .start()
+            .await
         };
 
         let mut rt = tokio::runtime::Builder::new()
@@ -103,7 +111,7 @@ fn start_proxy(config_path: &'static str) -> impl FnOnce() {
 
         rt.block_on(proxy)
     });
-    
+
     let controller = controller_receiver.recv().expect("receive proxy ctrl");
     move || {
         controller.stop();
@@ -130,6 +138,7 @@ fn start_mock_server() -> TestServer {
 
 // ------ Bench Helpers ------
 
+#[rustfmt::skip]
 fn proxy_bench(c: &mut Criterion, proxy_url: &str, name: &str, num_of_all_reqs: usize, num_of_users: usize, path: &str) {
     let test_data = Rc::new(RefCell::new((Duration::default(), 0, Duration::default())));
 
@@ -152,51 +161,68 @@ fn proxy_bench(c: &mut Criterion, proxy_url: &str, name: &str, num_of_all_reqs: 
     println!("_______________________________________________________");
 }
 
-fn bench_requests(b: &mut Bencher, num_of_all_requests: usize, users: usize, url: &str, test_data: &TestData) {
+fn bench_requests(
+    b: &mut Bencher,
+    num_of_all_requests: usize,
+    users: usize,
+    url: &str,
+    test_data: &TestData,
+) {
     // NOTE: We want to create a fresh `Runtime` to quickly kill the old connections.
     let mut rt = tokio::runtime::Builder::new()
         .enable_all()
         .basic_scheduler()
         .build()
         .expect("rt build");
-    
+
     let client = hyper::Client::new();
 
     b.iter_batched(
         || create_requests(url, &client, num_of_all_requests, users, test_data),
         |requests| rt.block_on(requests),
-        BatchSize::SmallInput
+        BatchSize::SmallInput,
     );
 }
 
 async fn create_requests(
-    url: &str, 
-    client: &hyper::Client<hyper::client::HttpConnector>, 
-    num_of_all_requests: usize, 
+    url: &str,
+    client: &hyper::Client<hyper::client::HttpConnector>,
+    num_of_all_requests: usize,
     users: usize,
     test_data: &TestData,
 ) {
     let url: hyper::Uri = url.parse().expect("parsed url");
-    let sequence_length = num_of_all_requests / users; 
+    let sequence_length = num_of_all_requests / users;
 
     let now_for_bench_time = Instant::now();
 
-    join_all(iter::repeat_with(|| {
-        async {
-            for _ in 0..sequence_length {
-                let now = Instant::now();
+    join_all(
+        iter::repeat_with(|| {
+            async {
+                for _ in 0..sequence_length {
+                    let now = Instant::now();
 
-                let res = client.get(url.clone()).await.expect("get response");
-                assert_eq!(res.status(), hyper::StatusCode::OK, "Did not receive a 200 HTTP status code.");
-                // Read response body until the end.
-                hyper::body::to_bytes(res.into_body()).await.expect("read response body");
+                    let res = client.get(url.clone()).await.expect("get response");
+                    assert_eq!(
+                        res.status(),
+                        hyper::StatusCode::OK,
+                        "Did not receive a 200 HTTP status code."
+                    );
+                    // Read response body until the end.
+                    hyper::body::to_bytes(res.into_body())
+                        .await
+                        .expect("read response body");
 
-                let mut test_data = test_data.borrow_mut();
-                test_data.0 += now.elapsed();
-                test_data.1 += 1;
+                    let mut test_data = test_data.borrow_mut();
+                    test_data.0 += now.elapsed();
+                    test_data.1 += 1;
+                }
             }
-        }
-    }).take(users).collect::<Vec<_>>()).await;
+        })
+        .take(users)
+        .collect::<Vec<_>>(),
+    )
+    .await;
 
     test_data.borrow_mut().2 += now_for_bench_time.elapsed();
 }
