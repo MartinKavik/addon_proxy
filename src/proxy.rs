@@ -9,18 +9,19 @@ use std::net::SocketAddr;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
 
-use tokio::sync::mpsc;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch, oneshot};
 use tokio::task;
 
 use sled;
 use shadow_clone::shadow_clone;
 
 mod config;
+mod controller;
 mod on_request;
 mod validations;
 
 pub use config::{ProxyConfig, ProxyRoute};
+pub use controller::ProxyController;
 pub use on_request::on_request;
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";
@@ -118,7 +119,11 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     ///
     /// Returns `hyper::Error` when request fails.
     pub on_request: OR,
-    pub on_server_start: Option<Box<dyn FnOnce()>>,
+
+    // Callback `on_server_start` is invoked on server start.
+    // You can stop the server by calling `ProxyController::stop`.
+    pub on_server_start: Option<Box<dyn FnOnce(ProxyController)>>,
+
     _phantom: (PhantomData<C>, PhantomData<B>, PhantomData<ORO>),
 }
 
@@ -193,12 +198,12 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
     /// #[tokio::main]
     /// async fn main() {
     ///     Proxy::new(Client::new(), on_request)
-    ///         .set_on_server_start(|| println!("Server started!"))
+    ///         .set_on_server_start(|_controller| println!("Server started!"))
     ///         .start()
     ///         .await
     /// }
     /// ```
-    pub fn set_on_server_start(&mut self, on_server_start: impl FnOnce() + 'static) -> &mut Self {
+    pub fn set_on_server_start(&mut self, on_server_start: impl FnOnce(ProxyController) + 'static) -> &mut Self {
         self.on_server_start = Some(Box::new(on_server_start));
         self
     }
@@ -294,15 +299,23 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
 
         let server = Server::bind(&addr).serve(make_service);
         println!("Listening on http://{}", addr);
+
+        // Prepare controller with ability to gracefully shutdown the server.
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+        let server = server.with_graceful_shutdown(async { shutdown_receiver.await.ok(); });
+
         if let Some(on_server_start) = self.on_server_start.take() {
-            on_server_start();
+            on_server_start(ProxyController { shutdown_sender });
         }
 
+        // Block until the server is stopped.
         if let Err(e) = server.await {
-            if db.flush_async().await.is_err() {
-                eprintln!("database flush error: {}", e);
-            }
             eprintln!("server error: {}", e);
+        }
+
+        // Save dirty data.
+        if let Err(e) = db.flush_async().await {
+            eprintln!("database flush error: {}", e);
         }
     }
 }

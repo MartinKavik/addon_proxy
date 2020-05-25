@@ -12,7 +12,7 @@ use http_test_server::TestServer;
 use hyper::Client;
 use hyper_tls::HttpsConnector;
 use hyper_timeout::TimeoutConnector;
-use ::addon_proxy::{Proxy, on_request};
+use ::addon_proxy::{Proxy, on_request, ProxyController};
 
 type TestData = Rc<RefCell<(Duration, u32)>>;
 
@@ -27,24 +27,32 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     // @TODO remove old proxy_db/
 
-    {
-        start_proxy("bench_data/proxy_cfg_no_cache.toml");
+    // ------ Cache Disabled ------
 
-        proxy_bench(c, proxy_url, "status", 1000, 1, "/status");
-        proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
-        // NOTE: It runs for cca 15 minutes.
-        // proxy_bench(c, &mut rt, "status_parallel_long", 1_000_000, 1000, proxy_url + "status");
+    let proxy_controller = start_proxy("bench_data/proxy_cfg_no_cache.toml");
+    proxy_bench(c, proxy_url, "status", 1000, 1, "/status");
+    proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
+    // NOTE: It runs for cca 15 minutes.
+    // proxy_bench(c, &mut rt, "status_parallel_long", 1_000_000, 1000, proxy_url + "status");
 
-        // NOTE: Origin is called through `localhost` => 
-        // change the route in TOML config to `127.0.0.1` once the issue is resolved:
-        // https://github.com/viniciusgerevini/http-test-server/issues/7
-        proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
-        proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
-        proxy_bench(c, proxy_url, "top | no_cache", 100, 1, "/origin/catalog/movie/top.json");
-        proxy_bench(c, proxy_url, "top_parallel | no_cache", 1_000, 100, "/origin/catalog/movie/top.json");
-    }
+    // NOTE: Origin is called through `localhost` => 
+    // change the route in TOML config to `127.0.0.1` once the issue is resolved:
+    // https://github.com/viniciusgerevini/http-test-server/issues/7
+    proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
+    proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
+    proxy_bench(c, proxy_url, "top | no_cache", 100, 1, "/origin/catalog/movie/top.json");
+    proxy_bench(c, proxy_url, "top_parallel | no_cache", 1_000, 100, "/origin/catalog/movie/top.json");
+    proxy_controller.stop();
 
-    // @TODO with cache
+    // ------ Cache Enabled ------
+    
+    let proxy_controller = start_proxy("bench_data/proxy_cfg.toml");
+    // NOTE: First requests are NOT cached.
+    proxy_bench(c, proxy_url, "manifest", 100, 1, "/origin/manifest.json");
+    proxy_bench(c, proxy_url, "manifest_parallel", 1_000, 100, "/origin/manifest.json");
+    proxy_bench(c, proxy_url, "top", 100, 1, "/origin/catalog/movie/top.json");
+    proxy_bench(c, proxy_url, "top_parallel", 1_000, 100, "/origin/catalog/movie/top.json");
+    proxy_controller.stop();
 }
 
 criterion_group!{
@@ -56,8 +64,8 @@ criterion_main!(benches);
 
 // ------ Start* Helpers ------
 
-fn start_proxy(config_path: &'static str) {
-    let (on_start_sender, on_start_receiver) = mpsc::channel();
+fn start_proxy(config_path: &'static str) -> ProxyController {
+    let (controller_sender, controller_receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let proxy = async { 
             Proxy::new(
@@ -70,7 +78,7 @@ fn start_proxy(config_path: &'static str) {
                 on_request
             )
                 .set_config_path(config_path)
-                .set_on_server_start(move || on_start_sender.send(()).expect("send start notification"))
+                .set_on_server_start(move |controller| controller_sender.send(controller).expect("send proxy controller"))
                 .start().await
         };
 
@@ -82,7 +90,7 @@ fn start_proxy(config_path: &'static str) {
 
         rt.block_on(proxy)
     });
-    on_start_receiver.recv().expect("receive start notification");
+    controller_receiver.recv().expect("receive proxy ctrl")
 }
 
 #[must_use = "TestServer is stopped on drop"]
