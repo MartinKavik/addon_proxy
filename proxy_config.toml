@@ -16,11 +16,11 @@ verbose = false
 [[routes]]
 from = "127.0.0.1:5000/origin"
 to = "http://localhost:5005"
+# validate = false
 
 [[routes]]
 from = "stremio-addon-helloworld.dev"
 to = "http://127.0.0.1:1337"
-# validate = false
 
 [[routes]]
 from = "stremio-addon-example.dev"
@@ -37,33 +37,8 @@ to = "http://127.0.0.1:1337"
 [[routes]]
 from = "stremio-addon-proxy.herokuapp.com/helloworld"
 to = "https://stremio-addon-helloworld.herokuapp.com"
-# validate = false
 
 [[routes]]
 from = "stremio-addon-proxy.herokuapp.com/rust-addon"
 to = "https://stremio-addon-example.herokuapp.com"
-
-# Routes for experiments
-
-[[routes]]
-from = "example.com"
-to = "http://localhost:8000"
-
-[[routes]]
-from = "sub.domain.com/my-addon"
-to = "http://localhost:9999"
-# sub.domain.com/my-addon/manifest.json => http://localhost:9999/manifest.json
-
-[[routes]]
-from = "my-domain.com"
-to = "http://localhost:8080"
-
-[[routes]]
-from = "sub.domain.com"
-to = "http://localhost:8080"
-
-[[routes]]
-from = "dont-validate.com"
-to = "http://localhost:8080"
-validate = false   # Note: allow /manifest.json ; bad_request on fail
 

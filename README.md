@@ -1,12 +1,12 @@
 # Addon Proxy
 
 ```bash
-cargo run
+cargo run --release
 ```
 
 ## Development
 
-Routes to published addons:
+### Routes to published addons:
 
 ```toml
 # proxy_config.toml
@@ -20,11 +20,28 @@ from = "stremio-addon-proxy.herokuapp.com/rust-addon"
 to = "https://stremio-addon-example.herokuapp.com"
 ```
  
-_Notes:_ 
+### _Notes:_ 
   - Deployed addons and the proxy on Heroku may be broken for testing purposes. 
   - The first response may be slow because of Heroku dyno cold start.
   - The proxy may have non-standard configuration - e.g. disabled cache.
   - Addons and the proxy is currently deployed manually by Heroku CLI.
+
+### Benchmarks
+
+```bash
+cargo bench
+```
+See `/benches/proxy_benchmark.rs`
+
+### Style
+
+Run
+```bash
+cargo make verify
+```
+before the push.
+
+If you don't have `cargo-make`, install it by the command `cargo install cargo-make`
  
 ## How it works
 
