@@ -17,10 +17,15 @@ use hyper::Client;
 use hyper_timeout::TimeoutConnector;
 use hyper_tls::HttpsConnector;
 
-// `Duration` - the sum of all measurements for sending a request and reading the entire response
-// `u32` - the number of all requests
-// `Duration` - bench time except setup time
-type TestData = Rc<RefCell<(Duration, u32, Duration)>>;
+#[derive(Default)]
+struct BenchData {
+    // The sum of all measurements of sending a request and reading the entire response.
+    measurements_sum: Duration,
+    // The number of all requests.
+    requests: u32,
+    // Bench time except the setup time.
+    time: Duration,
+}
 
 #[rustfmt::skip]
 pub fn criterion_benchmark(c: &mut Criterion) {
@@ -140,23 +145,23 @@ fn start_mock_server() -> TestServer {
 
 #[rustfmt::skip]
 fn proxy_bench(c: &mut Criterion, proxy_url: &str, name: &str, num_of_all_reqs: usize, num_of_users: usize, path: &str) {
-    let test_data = Rc::new(RefCell::new((Duration::default(), 0, Duration::default())));
+    let bench_data = Rc::new(RefCell::new(BenchData::default()));
 
     c.bench_function(name, |b| bench_requests(
-        b, num_of_all_reqs, num_of_users, &format!("{}{}", proxy_url, path), &test_data)
+        b, num_of_all_reqs, num_of_users, &format!("{}{}", proxy_url, path), &bench_data)
     );
     
-    let test_data = test_data.borrow();
+    let bench_data = bench_data.borrow();
 
-    let rps = Duration::new(1, 0).as_nanos() / (test_data.2 / test_data.1).as_nanos();
+    let rps = Duration::new(1, 0).as_nanos() / (bench_data.time / bench_data.requests).as_nanos();
     println!("_______________________________________________________");
     println!("Bench name ............................... {}", name);
     println!("Number of all requests per iteration...... {}", num_of_all_reqs.separated_string());
     println!("Number of users .......................... {}", num_of_users.separated_string());
-    println!("Send request & read response avg time .... {:#?}", test_data.0 / test_data.1);
+    println!("Send request & read response avg time .... {:#?}", bench_data.measurements_sum / bench_data.requests);
     println!("Requests & readings per second ........... {}", rps.separated_string());
-    println!("Number of all requests ................... {}", test_data.1.separated_string());
-    println!("Bench time ............................... {:#?}", test_data.2);
+    println!("Number of all requests ................... {}", bench_data.requests.separated_string());
+    println!("Bench time ............................... {:#?}", bench_data.time);
     println!("Path ..................................... {}", path);
     println!("_______________________________________________________");
 }
@@ -166,7 +171,7 @@ fn bench_requests(
     num_of_all_requests: usize,
     users: usize,
     url: &str,
-    test_data: &TestData,
+    bench_data: &Rc<RefCell<BenchData>>,
 ) {
     // NOTE: We want to create a fresh `Runtime` to quickly kill the old connections.
     let mut rt = tokio::runtime::Builder::new()
@@ -178,7 +183,7 @@ fn bench_requests(
     let client = hyper::Client::new();
 
     b.iter_batched(
-        || create_requests(url, &client, num_of_all_requests, users, test_data),
+        || create_requests(url, &client, num_of_all_requests, users, bench_data),
         |requests| rt.block_on(requests),
         BatchSize::SmallInput,
     );
@@ -189,7 +194,7 @@ async fn create_requests(
     client: &hyper::Client<hyper::client::HttpConnector>,
     num_of_all_requests: usize,
     users: usize,
-    test_data: &TestData,
+    bench_data: &Rc<RefCell<BenchData>>,
 ) {
     let url: hyper::Uri = url.parse().expect("parsed url");
     let sequence_length = num_of_all_requests / users;
@@ -213,9 +218,9 @@ async fn create_requests(
                         .await
                         .expect("read response body");
 
-                    let mut test_data = test_data.borrow_mut();
-                    test_data.0 += now.elapsed();
-                    test_data.1 += 1;
+                    let mut bench_data = bench_data.borrow_mut();
+                    bench_data.measurements_sum += now.elapsed();
+                    bench_data.requests += 1;
                 }
             }
         })
@@ -224,5 +229,5 @@ async fn create_requests(
     )
     .await;
 
-    test_data.borrow_mut().2 += now_for_bench_time.elapsed();
+    bench_data.borrow_mut().time += now_for_bench_time.elapsed();
 }
