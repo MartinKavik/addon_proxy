@@ -15,4 +15,4 @@ verbose = false
 
 [[routes]]
 from = "127.0.0.1:5000/origin"
-to = "http://localhost:5005"
+to = "http://127.0.0.1:5005"

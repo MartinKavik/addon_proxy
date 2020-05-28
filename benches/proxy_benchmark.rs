@@ -45,10 +45,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     {
         proxy_bench(c, proxy_url, "status", 1000, 1, "/status");
         proxy_bench(c, proxy_url, "status_parallel", 10_000, 100, "/status");
-
-        // NOTE: Origin is called through `localhost` => 
-        // change the route in TOML config to `127.0.0.1` once the issue is resolved to make it faster and more idiomatic:
-        // https://github.com/viniciusgerevini/http-test-server/issues/7
         proxy_bench(c, proxy_url, "manifest | no_cache", 100, 1, "/origin/manifest.json");
         proxy_bench(c, proxy_url, "manifest_parallel | no_cache", 1_000, 100, "/origin/manifest.json");
         proxy_bench(c, proxy_url, "top | no_cache", 100, 1, "/origin/catalog/movie/top.json");

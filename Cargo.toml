@@ -7,7 +7,7 @@ edition = "2018"
 [dev-dependencies]
 criterion = "0.3.2"
 futures = "0.3.5"
-http-test-server = "2.0.1"
+http-test-server = "2.1.0"
 remove_dir_all = "0.5.2"
 separator = "0.4.1"
 
