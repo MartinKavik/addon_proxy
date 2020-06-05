@@ -19,7 +19,7 @@ pub async fn bytes_to_body(bytes: Bytes) -> Result<Body, hyper::Error> {
 /// Map `Request` body.
 ///
 /// Standard `Body` is a `Stream` so this function is `async` to allow to aggregate `Stream` to vectors.
-pub async fn map_request_body<T, U, F, FO>(
+pub async fn map_request_body<T: Send, U, F: Send, FO: Send>(
     req: Request<T>,
     mapper: F,
 ) -> Result<Request<U>, hyper::Error>
@@ -35,7 +35,7 @@ where
 /// Map `Response` body.
 ///
 /// Standard `Body` is a `Stream` so this function is `async` to allow to aggregate `Stream` to vectors.
-pub async fn map_response_body<T, U, F, FO>(
+pub async fn map_response_body<T: Send, U, F: Send, FO: Send>(
     req: Response<T>,
     mapper: F,
 ) -> Result<Response<U>, hyper::Error>
@@ -55,7 +55,7 @@ pub fn clone_request<T: Clone>(req: &Request<T>) -> Request<T> {
     let mut new_req = Request::new(req.body().clone());
     *new_req.method_mut() = req.method().clone();
     *new_req.uri_mut() = req.uri().clone();
-    *new_req.version_mut() = req.version().clone();
+    *new_req.version_mut() = req.version();
     *new_req.headers_mut() = req.headers().clone();
     new_req
 }
@@ -65,8 +65,8 @@ pub fn clone_request<T: Clone>(req: &Request<T>) -> Request<T> {
 /// _Warning:_: Extensions cannot be cloned.
 pub fn clone_response<T: Clone>(response: &Response<T>) -> Response<T> {
     let mut new_resp = Response::new(response.body().clone());
-    *new_resp.status_mut() = response.status().clone();
-    *new_resp.version_mut() = response.version().clone();
+    *new_resp.status_mut() = response.status();
+    *new_resp.version_mut() = response.version();
     *new_resp.headers_mut() = response.headers().clone();
     // *new_resp.extensions_mut() = response.extensions().clone();
     new_resp

@@ -145,7 +145,11 @@ pub struct ProxyConfig {
 
 impl ProxyConfig {
     /// Read configuration from the TOML file and try to parse it into `ProxyConfig`.
-    pub async fn load(path: impl AsRef<Path>) -> Result<ProxyConfig, String> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `String` error when reading the file fails or when TOML parsing fails.
+    pub async fn load(path: impl AsRef<Path> + Send) -> Result<Self, String> {
         let config = fs::read_to_string(path)
             .await
             .map_err(|err| err.to_string())?;

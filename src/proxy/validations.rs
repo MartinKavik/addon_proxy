@@ -13,7 +13,7 @@ pub fn validate_request(_: &Request<Bytes>, path: &str) -> bool {
         _ => (),
     }
 
-    if let Err(error) = ResourceRef::from_str(&path) {
+    if let Err(error) = ResourceRef::from_str(path) {
         eprintln!(
             "Request validation error! (Path: '{}', Error: '{:#?}')",
             path, error

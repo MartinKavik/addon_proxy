@@ -79,6 +79,10 @@ struct CacheValueForSerialization<'a> {
 type OnRequestClient = Arc<Client<TimeoutConnector<HttpsConnector<HttpConnector>>>>;
 
 /// See documentation for struct `Proxy` fields.
+///
+/// # Errors
+///
+/// Returns error when HTTP stream handling fails.
 pub async fn on_request(
     req: Request<Body>,
     client: OnRequestClient,
@@ -93,7 +97,7 @@ pub async fn on_request(
     let req = map_request_body(req, body_to_bytes).await?;
 
     let req_or_response =
-        apply_request_middlewares(req, &proxy_config, schedule_config_reload, &db);
+        apply_request_middlewares(req, &proxy_config, &schedule_config_reload, &db);
 
     if proxy_config.verbose {
         println!("mapped req or response: {:#?}", req_or_response);
@@ -133,7 +137,7 @@ async fn send_request_and_handle_response(
     match client.request(req).await {
         Ok(response) => {
             if !validations::validate_response(&response) {
-                return Ok(handle_origin_fail(req_clone, proxy_config, db));
+                return Ok(handle_origin_fail(&req_clone, proxy_config, db));
             }
             if !proxy_config.cache_enabled {
                 if proxy_config.verbose {
@@ -146,13 +150,13 @@ async fn send_request_and_handle_response(
         // Request failed - return the response without caching.
         Err(error) => {
             eprintln!("Request error: {:#?}", error);
-            Ok(handle_origin_fail(req_clone, proxy_config, db))
+            Ok(handle_origin_fail(&req_clone, proxy_config, db))
         }
     }
 }
 
 /// Request to origin failed (e.g. timeout) or the response is invalid.
-fn handle_origin_fail(req: Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) -> Response<Body> {
+fn handle_origin_fail(req: &Request<Bytes>, proxy_config: &ProxyConfig, db: &Db) -> Response<Body> {
     let cache_key = CacheKey {
         method: req.method(),
         uri: req.uri(),
@@ -268,7 +272,7 @@ fn validity_from_response(response: &Response<Body>, proxy_config: &ProxyConfig)
 fn apply_request_middlewares(
     mut req: Request<Bytes>,
     proxy_config: &ProxyConfig,
-    schedule_config_reload: ScheduleConfigReload,
+    schedule_config_reload: &ScheduleConfigReload,
     db: &Db,
 ) -> Result<Request<Bytes>, Response<Body>> {
     req = handle_config_reload(req, proxy_config, schedule_config_reload)?;
@@ -285,7 +289,7 @@ fn apply_request_middlewares(
 fn handle_config_reload(
     req: Request<Bytes>,
     proxy_config: &ProxyConfig,
-    schedule_config_reload: ScheduleConfigReload,
+    schedule_config_reload: &ScheduleConfigReload,
 ) -> Result<Request<Bytes>, Response<Body>> {
     if req.uri().path() == proxy_config.reload_config_url_path {
         schedule_config_reload();
@@ -326,8 +330,8 @@ fn handle_status(
 /// # Errors
 ///
 /// - Returns 200 and the content of `landing.html` when the incoming request does not match any routes.
-/// - Returns BAD_REQUEST when request validation fails.
-/// - Returns INTERNAL_SERVER_ERROR response if the new address is invalid.
+/// - Returns `BAD_REQUEST` when request validation fails.
+/// - Returns `INTERNAL_SERVER_ERROR` response if the new address is invalid.
 fn handle_routes(
     mut req: Request<Bytes>,
     proxy_config: &ProxyConfig,
@@ -356,11 +360,14 @@ fn handle_routes(
         None => {
             if uri.path() == "/" {
                 // Return `landing.html`.
-                let response = Response::new(Body::from(include_bytes!("../../landing.html").as_ref()));
+                let response =
+                    Response::new(Body::from(include_bytes!("../../landing.html").as_ref()));
                 return Err(response);
             } else {
                 // Return 404
-                let mut response = Response::new(Body::from("404. The requested URL was not found on this server."));
+                let mut response = Response::new(Body::from(
+                    "404. The requested URL was not found on this server.",
+                ));
                 *response.status_mut() = StatusCode::NOT_FOUND;
                 return Err(response);
             }
@@ -384,7 +391,7 @@ fn handle_routes(
     *req.uri_mut() = match format!(
         "{}{}",
         route.to,
-        routed_path_and_query.trim_start_matches("/")
+        routed_path_and_query.trim_start_matches('/')
     )
     .parse()
     {
@@ -398,15 +405,14 @@ fn handle_routes(
     };
 
     // Replace `host` header with the new one from `Request`'s `uri`.
-    match req.uri().host().and_then(|host| host.parse().ok()) {
-        Some(host) => req.headers_mut().insert("host", host),
-        None => {
-            eprintln!("Missing host in the request uri: {}", req.uri());
-            let mut response = Response::new(Body::from("Cannot route to URI without host."));
-            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            return Err(response);
-        }
-    };
+    if let Some(host) = req.uri().host().and_then(|host| host.parse().ok()) {
+        req.headers_mut().insert("host", host);
+    } else {
+        eprintln!("Missing host in the request uri: {}", req.uri());
+        let mut response = Response::new(Body::from("Cannot route to URI without host."));
+        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        return Err(response);
+    }
 
     Ok(req)
 }
@@ -415,8 +421,8 @@ fn handle_routes(
 ///
 /// # Errors
 /// - Returns cached response.
-/// - Returns INTERNAL_SERVER_ERROR response when DB reading fails.
-/// - Returns INTERNAL_SERVER_ERROR response when deserialization of a cached response fails.
+/// - Returns `INTERNAL_SERVER_ERROR` response when DB reading fails.
+/// - Returns `INTERNAL_SERVER_ERROR` response when deserialization of a cached response fails.
 fn handle_cache(
     req: Request<Bytes>,
     db: &Db,

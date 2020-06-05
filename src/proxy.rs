@@ -122,11 +122,11 @@ pub struct Proxy<C, B, CC, OR, ORO> {
     // Callback `on_server_start` is invoked on server start.
     //
     // You can stop the server by calling `ProxyController::stop`.
-    pub on_server_start: Option<Box<dyn FnOnce(ProxyController)>>,
+    pub on_server_start: Option<Box<dyn FnOnce(ProxyController) + Send>>,
 
     // Callback `on_server_stop` is invoked when the server has been stopped
     /// and all resources have been freed.
-    pub on_server_stop: Option<Box<dyn FnOnce()>>,
+    pub on_server_stop: Option<Box<dyn FnOnce() + Send>>,
 
     _phantom: (PhantomData<C>, PhantomData<B>, PhantomData<ORO>),
 }
@@ -135,7 +135,7 @@ impl<C, B, CC, OR, ORO> Proxy<C, B, CC, OR, ORO>
 where
     C: Send + Sync + 'static,
     B: Send + 'static,
-    CC: Fn(&ProxyConfig) -> Client<C, B>,
+    CC: Send + Fn(&ProxyConfig) -> Client<C, B>,
     ORO: Future<Output = Result<Response<Body>, hyper::Error>> + Send,
     OR: Fn(Request<Body>, Arc<Client<C, B>>, Arc<ProxyConfig>, ScheduleConfigReload, Db) -> ORO
         + Send
@@ -214,7 +214,7 @@ where
     /// ```
     pub fn set_on_server_start(
         &mut self,
-        on_server_start: impl FnOnce(ProxyController) + 'static,
+        on_server_start: impl FnOnce(ProxyController) + 'static + Send,
     ) -> &mut Self {
         self.on_server_start = Some(Box::new(on_server_start));
         self
@@ -239,7 +239,10 @@ where
     ///         .await
     /// }
     /// ```
-    pub fn set_on_server_stop(&mut self, on_server_stop: impl FnOnce() + 'static) -> &mut Self {
+    pub fn set_on_server_stop(
+        &mut self,
+        on_server_stop: impl FnOnce() + 'static + Send,
+    ) -> &mut Self {
         self.on_server_stop = Some(Box::new(on_server_stop));
         self
     }
@@ -293,7 +296,7 @@ where
         // Spawn a new task that broadcasts (re)loaded configs.
         // These configs are picked just before the `on_request` callback is called.
         task::spawn(async move {
-            while let Some(_) = config_reload_receiver.recv().await {
+            while config_reload_receiver.recv().await.is_some() {
                 match ProxyConfig::load(&config_path).await {
                     Ok(proxy_config) => {
                         config_sender
