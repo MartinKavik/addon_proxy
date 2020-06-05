@@ -346,7 +346,7 @@ fn handle_routes(
     // http://example.com/abc/efg?x=1&y=2 -> example.com/abc/efg?x=1&y=2
     let from = format!("{}{}{}", host, uri.path(), uri.query().unwrap_or_default());
 
-    // Get the first matching route or return a landing file.
+    // Get the first matching route or return 404 / a landing file.
     let route = proxy_config
         .routes
         .iter()
@@ -354,9 +354,16 @@ fn handle_routes(
     let route = match route {
         Some(route) => route,
         None => {
-            // Return `landing.html`.
-            let response = Response::new(Body::from(include_bytes!("../../landing.html").as_ref()));
-            return Err(response);
+            if uri.path() == "/" {
+                // Return `landing.html`.
+                let response = Response::new(Body::from(include_bytes!("../../landing.html").as_ref()));
+                return Err(response);
+            } else {
+                // Return 404
+                let mut response = Response::new(Body::from("404. The requested URL was not found on this server."));
+                *response.status_mut() = StatusCode::NOT_FOUND;
+                return Err(response);
+            }
         }
     };
 
