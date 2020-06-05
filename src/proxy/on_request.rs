@@ -482,3 +482,168 @@ fn handle_cache(
         }
     }
 }
+
+// ------ ------- TESTS ------ ------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ProxyRoute;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::path::PathBuf;
+
+    // ------ handle_status ------
+
+    #[tokio::test]
+    async fn status() {
+        let request = Request::builder()
+            .uri("https://example.com/status")
+            .body(Bytes::new())
+            .unwrap();
+        let config = default_proxy_config();
+
+        let response = handle_status(request, &config).unwrap_err();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(body, "Proxy is ready.");
+    }
+
+    // ------ handle_routes ------
+
+    #[tokio::test]
+    async fn handle_routes_unknown_root() {
+        let request = Request::builder()
+            .uri("https://example.com")
+            .body(Bytes::new())
+            .unwrap();
+        let config = default_proxy_config();
+
+        let response = handle_routes(request, &config).unwrap_err();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(body, include_str!("../../landing.html"));
+    }
+
+    #[tokio::test]
+    async fn handle_routes_unknown_root_slash() {
+        let request = Request::builder()
+            .uri("https://example.com/")
+            .body(Bytes::new())
+            .unwrap();
+        let config = default_proxy_config();
+
+        let response = handle_routes(request, &config).unwrap_err();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(body, include_str!("../../landing.html"));
+    }
+
+    #[tokio::test]
+    async fn handle_routes_unknown() {
+        let request = Request::builder()
+            .uri("https://example.com/unknown")
+            .body(Bytes::new())
+            .unwrap();
+        let config = default_proxy_config();
+
+        let response = handle_routes(request, &config).unwrap_err();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body = body_to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(body, "404. The requested URL was not found on this server.");
+    }
+
+    #[tokio::test]
+    async fn handle_routes_manifest() {
+        let request = Request::builder()
+            .uri("https://example.com/manifest.json")
+            .body(Bytes::new())
+            .unwrap();
+        let mut config = default_proxy_config();
+        config.routes.push(ProxyRoute {
+            from: "example.com".to_owned(),
+            to: "http://localhost:8080".parse().unwrap(),
+            validate: None,
+        });
+
+        let request = handle_routes(request, &config).unwrap();
+        assert_eq!(request.uri(), "http://localhost:8080/manifest.json");
+    }
+
+    #[tokio::test]
+    async fn handle_routes_top() {
+        let request = Request::builder()
+            .uri("https://example.com/catalog/movie/top.json")
+            .body(Bytes::new())
+            .unwrap();
+        let mut config = default_proxy_config();
+        config.routes.push(ProxyRoute {
+            from: "example.com".to_owned(),
+            to: "http://localhost:8080".parse().unwrap(),
+            validate: None,
+        });
+
+        let request = handle_routes(request, &config).unwrap();
+        assert_eq!(
+            request.uri(),
+            "http://localhost:8080/catalog/movie/top.json"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_routes_invalid_validate() {
+        let request = Request::builder()
+            .uri("https://example.com/invalid")
+            .body(Bytes::new())
+            .unwrap();
+        let mut config = default_proxy_config();
+        config.routes.push(ProxyRoute {
+            from: "example.com".to_owned(),
+            to: "http://localhost:8080".parse().unwrap(),
+            validate: None,
+        });
+
+        let response = handle_routes(request, &config).unwrap_err();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = body_to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(body, "Invalid request.");
+    }
+
+    #[tokio::test]
+    async fn handle_routes_invalid() {
+        let request = Request::builder()
+            .uri("https://example.com/invalid")
+            .body(Bytes::new())
+            .unwrap();
+        let mut config = default_proxy_config();
+        config.routes.push(ProxyRoute {
+            from: "example.com".to_owned(),
+            to: "http://localhost:8080".parse().unwrap(),
+            validate: Some(false),
+        });
+
+        let request = handle_routes(request, &config).unwrap();
+        assert_eq!(request.uri(), "http://localhost:8080/invalid");
+    }
+
+    fn default_proxy_config() -> ProxyConfig {
+        ProxyConfig {
+            reload_config_url_path: "/reload-proxy-config".to_owned(),
+            clear_cache_url_path: "/clear-cache".to_owned(),
+            status_url_path: "/status".to_owned(),
+            db_directory: PathBuf::from("proxy_db"),
+            ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            default_port: 5000,
+            cache_enabled: false,
+            default_cache_validity: 600,            // 10 * 60
+            cache_stale_threshold_on_fail: 172_800, // 48 * 60 * 60
+            timeout: 20,
+            routes: Vec::new(),
+            verbose: false,
+        }
+    }
+}
