@@ -28,3 +28,78 @@ pub fn validate_request(_: &Request<Bytes>, path: &str) -> bool {
 pub fn validate_response(response: &Response<Body>) -> bool {
     response.status().is_success()
 }
+
+// ------ ------- TESTS ------ ------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::StatusCode;
+
+    // ------ validate_request ------
+
+    #[test]
+    fn validate_request_manifest() {
+        let request = Request::default();
+        let path = "/manifest.json";
+        assert!(validate_request(&request, path));
+    }
+
+    #[test]
+    fn validate_request_root() {
+        let request = Request::default();
+        let path = "";
+        assert!(validate_request(&request, path));
+    }
+
+    #[test]
+    fn validate_request_root_slash() {
+        let request = Request::default();
+        let path = "/";
+        assert!(validate_request(&request, path));
+    }
+
+    #[test]
+    fn validate_request_public() {
+        let request = Request::default();
+        let path = "/public/docs/file.pdf";
+        assert!(validate_request(&request, path));
+    }
+
+    #[test]
+    fn validate_request_images() {
+        let request = Request::default();
+        let path = "/images/my_image.png";
+        assert!(validate_request(&request, path));
+    }
+
+    #[test]
+    fn validate_request_top() {
+        let request = Request::default();
+        let path = "/catalog/movie/top.json";
+        assert!(validate_request(&request, path));
+    }
+
+    #[test]
+    fn validate_request_unknown() {
+        let request = Request::default();
+        let path = "/unknown";
+        assert!(!validate_request(&request, path));
+    }
+
+    // ------ validate_response ------
+
+    #[test]
+    fn validate_response_success() {
+        let mut response = Response::default();
+        *response.status_mut() = StatusCode::OK;
+        assert!(validate_response(&response));
+    }
+
+    #[test]
+    fn validate_response_fail() {
+        let mut response = Response::default();
+        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        assert!(!validate_response(&response));
+    }
+}
