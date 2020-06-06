@@ -24,6 +24,7 @@ dependencies = [
  "shadow-clone",
  "sled",
  "stremio-core",
+ "test_framework",
  "tokio",
  "toml",
 ]
@@ -1517,6 +1518,14 @@ dependencies = [
  "redox_syscall",
  "remove_dir_all",
  "winapi 0.3.8",
+]
+
+[[package]]
+name = "test_framework"
+version = "0.1.0"
+dependencies = [
+ "quote 1.0.3",
+ "syn 1.0.17",
 ]
 
 [[package]]
