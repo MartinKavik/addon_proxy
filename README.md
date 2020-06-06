@@ -33,7 +33,7 @@ cargo bench
 ```
 See `/benches/proxy_benchmark.rs`
 
-### Style
+### Format & Lint & Test
 
 Run
 ```bash
@@ -41,7 +41,12 @@ cargo make verify
 ```
 before the push.
 
-If you don't have `cargo-make`, install it by the command `cargo install cargo-make`
+- If you don't have `cargo-make`, install it by the command `cargo install cargo-make`
+- You can run also individual `verify` sub-commands:
+  - `cargo make fmt` or `cargo fmt`
+  - `cargo make clippy`
+  - `cargo make test` or `cargo test`
+
  
 ## How it works
 
