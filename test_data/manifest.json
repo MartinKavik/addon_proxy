@@ -1,0 +1,27 @@
+{
+    "id": "org.martinkavik.helloworld_proxy",
+    "version": "1.0.0",
+    "name": "Hello World Proxy test",
+    "description": "Addon to test proxy",
+    "resources": [
+      "catalog",
+      "stream"
+    ],
+    "types": [
+      "movie",
+      "series"
+    ],
+    "catalogs": [
+      {
+        "type": "movie",
+        "id": "helloworldmovies"
+      },
+      {
+        "type": "series",
+        "id": "helloworldseries"
+      }
+    ],
+    "idPrefixes": [
+      "tt"
+    ]
+  }

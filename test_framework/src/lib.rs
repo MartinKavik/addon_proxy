@@ -7,6 +7,7 @@ use std::mem;
 ///
 /// # Example
 ///
+// ```rust,ignore
 /// use test_framework::tests;
 ///
 /// tests!{
@@ -30,6 +31,58 @@ use std::mem;
 ///         }
 ///     }
 /// }
+///```
+///
+/// # Generated code
+///
+// ```rust,ignore
+/// use test_framework::tests;
+///
+/// tests!{
+///     #[cfg(test)]
+///     mod integration {
+///         // ------ SETUP ------
+///        
+///         fn before_all() {}
+///
+///         fn before_each() {}
+///
+///         fn after_each() {}
+///
+///         fn after_all() {)
+///
+///         // ------ TESTS ------
+///
+///         #[test]
+///         fn it_works() {
+///             run_test_(|| {assert_eq!(2 + 2, 4);});
+///         }
+///
+///         const TEST_COUNT: usize = 1;
+///         static REMAINING_TESTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(TEST_COUNT);
+///         static BEFORE_ALL_CALL: std::sync::Once = std::sync::Once::new();
+///         fn run_test_<T>(test: T) -> ()
+///             where T: FnOnce() -> () + std::panic::UnwindSafe
+///         {
+///             BEFORE_ALL_CALL.call_once(|| {
+///                 before_all();
+///             });
+///             before_each();  
+///
+///             let result = std::panic::catch_unwind(|| {
+///                 test()
+///             });    
+///
+///             after_each();   
+///             if REMAINING_TESTS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1 {
+///                 after_all();
+///             }
+///             
+///             assert!(result.is_ok())
+///         }    
+///     }
+/// }
+///```
 #[proc_macro_attribute]
 pub fn test_callbacks(_: TokenStream, tokens: TokenStream) -> TokenStream {
     let mut item_mod = parse_macro_input!(tokens as syn::ItemMod);
