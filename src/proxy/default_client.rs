@@ -7,6 +7,9 @@ use hyper::Client;
 use hyper_timeout::TimeoutConnector;
 use hyper_tls::HttpsConnector;
 
+/// Creates a default client for `Proxy`.
+///
+/// It handles also HTTPS connnections and its timeout value is loaded from `proxy_config`.
 #[allow(clippy::must_use_candidate)]
 pub fn default_client(
     proxy_config: &ProxyConfig,
