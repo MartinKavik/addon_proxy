@@ -16,6 +16,7 @@ dependencies = [
  "hyper",
  "hyper-timeout",
  "hyper-tls",
+ "once_cell",
  "remove_dir_all",
  "separator",
  "serde",

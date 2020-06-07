@@ -92,7 +92,12 @@ pub fn test_callbacks(_: TokenStream, tokens: TokenStream) -> TokenStream {
 
         for item in items.iter_mut() {
             if let syn::Item::Fn(item_fn) = item {
-                if item_fn.attrs.iter().any(|attr| attr.path.is_ident("test")) {
+                let is_test = item_fn.attrs.iter().any(|attr| {
+                    attr.path.segments.iter().any(|segment| {
+                        segment.ident == "test"
+                    })
+                });
+                if is_test {
                     test_count += 1;
 
                     let stmts = mem::take(&mut item_fn.block.stmts);
@@ -100,13 +105,21 @@ pub fn test_callbacks(_: TokenStream, tokens: TokenStream) -> TokenStream {
                         brace_token: item_fn.block.brace_token,
                         stmts
                     };
-                    let wrapped_stmts = parse_quote! {
-                        run_test_(|| #nested_block);
+                    let wrapped_stmts = if item_fn.sig.asyncness.is_some() {
+                        parse_quote! {
+                            run_test_async(async #nested_block).await;
+                        }
+                    } else {
+                        parse_quote! {
+                            run_test_sync(|| #nested_block);
+                        }
                     };
                     item_fn.block.stmts = vec![wrapped_stmts];
                 }
             }
         }
+
+        eprintln!("test_count: {}", test_count);
 
         let item_test_count = parse_quote! {
             const TEST_COUNT: usize = #test_count;
@@ -123,10 +136,8 @@ pub fn test_callbacks(_: TokenStream, tokens: TokenStream) -> TokenStream {
         };
         items.push(syn::Item::Static(item_before_all_call));
 
-        let item_fn_run_test_ = parse_quote! {
-            fn run_test_<T>(test: T) -> ()
-                where T: FnOnce() -> () + std::panic::UnwindSafe
-            {
+        let item_fn_run_test_sync = parse_quote! {
+            fn run_test_sync(test: impl FnOnce() + std::panic::UnwindSafe) {
                 BEFORE_ALL_CALL.call_once(|| {
                     before_all();
                 });
@@ -144,7 +155,28 @@ pub fn test_callbacks(_: TokenStream, tokens: TokenStream) -> TokenStream {
                 assert!(result.is_ok())
             }    
         };    
-        items.push(syn::Item::Fn(item_fn_run_test_));
+        items.push(syn::Item::Fn(item_fn_run_test_sync));
+
+        let item_fn_run_test_async = parse_quote! {
+            async fn run_test_async(test: impl futures::future::Future)
+            {
+                BEFORE_ALL_CALL.call_once(|| {
+                    before_all();
+                });
+                before_each();  
+        
+                use futures::future::FutureExt;
+                let result = std::panic::AssertUnwindSafe(test).catch_unwind().await; 
+        
+                after_each();   
+                if REMAINING_TESTS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1 {
+                    after_all();
+                }
+                
+                assert!(result.is_ok())
+            }    
+        };    
+        items.push(syn::Item::Fn(item_fn_run_test_async));
     }
 
     let output = quote!{ #item_mod };

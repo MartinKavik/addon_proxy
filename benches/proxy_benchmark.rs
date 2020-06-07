@@ -120,7 +120,7 @@ fn start_proxy(config_path: &'static str) -> impl FnOnce() {
     }
 }
 
-#[must_use = "TestServer is stopped on drop"]
+#[must_use = "Mock server is stopped on drop"]
 fn start_mock_server() -> TestServer {
     let mock_server = TestServer::new_with_port(5005).unwrap();
 
