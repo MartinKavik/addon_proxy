@@ -16,11 +16,13 @@ use shadow_clone::shadow_clone;
 
 mod config;
 mod controller;
+mod default_client;
 mod on_request;
 mod validations;
 
 pub use config::{ProxyConfig, ProxyRoute};
 pub use controller::ProxyController;
+pub use default_client::default_client;
 pub use on_request::on_request;
 
 pub const DEFAULT_CONFIG_PATH: &str = "proxy_config.toml";

@@ -12,10 +12,7 @@ use http_test_server::TestServer;
 use remove_dir_all::remove_dir_all;
 use separator::Separatable;
 
-use ::addon_proxy::{on_request, Proxy};
-use hyper::Client;
-use hyper_timeout::TimeoutConnector;
-use hyper_tls::HttpsConnector;
+use ::addon_proxy::{on_request, Proxy, default_client};
 
 #[derive(Default)]
 struct BenchData {
@@ -83,14 +80,7 @@ fn start_proxy(config_path: &'static str) -> impl FnOnce() {
     std::thread::spawn(move || {
         let proxy = async {
             Proxy::new(
-                |proxy_config| {
-                    let https = HttpsConnector::new();
-                    let mut connector = TimeoutConnector::new(https);
-                    connector.set_read_timeout(Some(Duration::from_secs(u64::from(
-                        proxy_config.timeout,
-                    ))));
-                    Client::builder().build(connector)
-                },
+                default_client,
                 on_request,
             )
             .set_config_path(config_path)

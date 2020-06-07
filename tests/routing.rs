@@ -6,15 +6,12 @@ mod routing {
     use once_cell::sync::Lazy;
 
     use std::sync::mpsc;
-    use std::time::Duration;
     use std::sync::Mutex;
 
     use http_test_server::TestServer;
 
-    use ::addon_proxy::{on_request, Proxy};
+    use ::addon_proxy::{on_request, Proxy, default_client};
     use hyper::{Client, StatusCode, Uri};
-    use hyper_timeout::TimeoutConnector;
-    use hyper_tls::HttpsConnector;
 
     static PROXY_STOPPER: Lazy<Mutex<Option<Box<dyn FnOnce() + Send>>>> = Lazy::new(|| Mutex::new(None));
     static MOCK_SERVER: Lazy<Mutex<Option<TestServer>>> = Lazy::new(|| Mutex::new(None));
@@ -77,14 +74,7 @@ mod routing {
         std::thread::spawn(move || {
             let proxy = async {
                 Proxy::new(
-                    |proxy_config| {
-                        let https = HttpsConnector::new();
-                        let mut connector = TimeoutConnector::new(https);
-                        connector.set_read_timeout(Some(Duration::from_secs(u64::from(
-                            proxy_config.timeout,
-                        ))));
-                        Client::builder().build(connector)
-                    },
+                    default_client,
                     on_request,
                 )
                 .set_config_path(config_path)
