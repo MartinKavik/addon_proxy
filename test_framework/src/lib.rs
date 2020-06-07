@@ -119,8 +119,6 @@ pub fn test_callbacks(_: TokenStream, tokens: TokenStream) -> TokenStream {
             }
         }
 
-        eprintln!("test_count: {}", test_count);
-
         let item_test_count = parse_quote! {
             const TEST_COUNT: usize = #test_count;
         };

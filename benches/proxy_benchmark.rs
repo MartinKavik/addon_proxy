@@ -12,7 +12,7 @@ use http_test_server::TestServer;
 use remove_dir_all::remove_dir_all;
 use separator::Separatable;
 
-use ::addon_proxy::{on_request, Proxy, default_client};
+use ::addon_proxy::{default_client, on_request, Proxy};
 
 #[derive(Default)]
 struct BenchData {
@@ -79,19 +79,16 @@ fn start_proxy(config_path: &'static str) -> impl FnOnce() {
 
     std::thread::spawn(move || {
         let proxy = async {
-            Proxy::new(
-                default_client,
-                on_request,
-            )
-            .set_config_path(config_path)
-            .set_on_server_start(move |controller| {
-                controller_sender
-                    .send(controller)
-                    .expect("send proxy controller")
-            })
-            .set_on_server_stop(move || stop_signal_sender.send(()).expect("send stop signal"))
-            .start()
-            .await
+            Proxy::new(default_client, on_request)
+                .set_config_path(config_path)
+                .set_on_server_start(move |controller| {
+                    controller_sender
+                        .send(controller)
+                        .expect("send proxy controller")
+                })
+                .set_on_server_stop(move || stop_signal_sender.send(()).expect("send stop signal"))
+                .start()
+                .await
         };
 
         let mut rt = tokio::runtime::Builder::new()
