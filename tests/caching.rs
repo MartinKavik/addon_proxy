@@ -9,8 +9,9 @@ mod caching {
     use std::sync::Mutex;
 
     use http_test_server::TestServer;
+    use chrono::Utc;
 
-    use ::addon_proxy::{default_client, on_request, Proxy};
+    use ::addon_proxy::{default_client, on_request, Proxy, helpers::set_now_getter};
     use hyper::{Client, StatusCode, Uri};
     use hyper::client::HttpConnector;
 
@@ -68,11 +69,13 @@ mod caching {
         let res = client.get(url_from_path(path)).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK,);
 
-        // move time (> default_cache_validity)        
+        // move time (> default_cache_validity)       
+        set_now_getter(|| Utc::now().timestamp() + (11 * 60)); 
 
         let res = client.get(url_from_path(path)).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK,);
 
+        // this request should be loaded from cache
         let res = client.get(url_from_path(path)).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK,);
 

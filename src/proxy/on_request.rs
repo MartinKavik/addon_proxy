@@ -12,9 +12,9 @@ use hyper_tls::HttpsConnector;
 use http::{HeaderMap, Method, StatusCode, Uri};
 
 use cache_control::CacheControl;
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use crate::helpers::now_timestamp;
 use crate::hyper_helpers::{
     body_to_bytes, bytes_to_body, clone_request, fork_response, map_request_body,
 };
@@ -169,7 +169,7 @@ fn handle_origin_fail(req: &Request<Bytes>, proxy_config: &ProxyConfig, db: &Db)
             match bincode::deserialize::<CacheValueForDeserialization>(cached_response.as_ref()) {
                 // Return the cached response.
                 Ok(cached_response) => {
-                    if Utc::now().timestamp() - cached_response.timestamp
+                    if now_timestamp() - cached_response.timestamp
                         > i64::from(proxy_config.cache_stale_threshold_on_fail)
                     {
                         let mut response = Response::new(Body::from(
@@ -232,7 +232,7 @@ async fn cache_response(
         status: response_with_byte_body.status(),
         headers: response_with_byte_body.headers(),
         body: response_with_byte_body.body(),
-        timestamp: Utc::now().timestamp(),
+        timestamp: now_timestamp(),
         validity: validity_from_response(&response, proxy_config),
     });
     match serialization_result {
@@ -443,7 +443,7 @@ fn handle_cache(
                     // Return the cached response.
                     Ok(cached_response) => {
                         // Is cached response still valid?
-                        if Utc::now().timestamp()
+                        if now_timestamp()
                             > cached_response.timestamp + i64::from(cached_response.validity)
                         {
                             return Ok(req);
