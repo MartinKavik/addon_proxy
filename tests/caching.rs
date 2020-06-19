@@ -8,12 +8,12 @@ mod caching {
     use std::sync::mpsc;
     use std::sync::Mutex;
 
-    use http_test_server::TestServer;
     use chrono::Utc;
+    use http_test_server::TestServer;
 
-    use ::addon_proxy::{default_client, on_request, Proxy, helpers::set_now_getter};
-    use hyper::{Client, StatusCode, Uri};
+    use ::addon_proxy::{default_client, helpers::set_now_getter, on_request, Proxy};
     use hyper::client::HttpConnector;
+    use hyper::{Client, StatusCode, Uri};
 
     static PROXY_STOPPER: Lazy<Mutex<Option<Box<dyn FnOnce() + Send>>>> =
         Lazy::new(|| Mutex::new(None));
@@ -37,11 +37,10 @@ mod caching {
 
     // Caching: the proxy must cache responses by respecting the HTTP cache headers that come from the origin
 
-
     #[tokio::test]
     async fn caching_test_suite() {
         let client = Client::new();
-        // Run tests sequentially because we need to manipulate with time and modify cache. 
+        // Run tests sequentially because we need to manipulate with time and modify cache.
         test_no_headers(&client).await;
         test_max_age_header(&client).await;
         test_stale_response(&client).await;
@@ -55,26 +54,25 @@ mod caching {
 
         let mock_server = start_mock_server();
         let resource = mock_server.create_resource("/catalog/movie/top.json");
-        resource
-            .body(include_str!("../test_data/top.json"));
+        resource.body(include_str!("../test_data/top.json"));
 
         let path = "/origin/catalog/movie/top.json";
         let send_request = || async { client.get(url_from_path(path)).await.unwrap() };
 
         // ------ ACT ------
 
-        send_request().await;  // This request should be loaded from the origin.
+        send_request().await; // This request should be loaded from the origin.
         send_request().await;
 
-        // Jump in time: +11 min. Jump has to be longer than `default_cache_validity` in proxy config.       
-        set_now_getter(|| Utc::now().timestamp() + (11 * 60)); 
+        // Jump in time: +11 min. Jump has to be longer than `default_cache_validity` in proxy config.
+        set_now_getter(|| Utc::now().timestamp() + (11 * 60));
 
         send_request().await; // This request should be loaded from the origin.
         send_request().await;
         send_request().await;
 
         // ------ ASSERT ------
-        
+
         // 3 requests should be loaded from cache, 2 from the origin.
         assert_eq!(resource.request_count(), 2);
     }
@@ -97,18 +95,18 @@ mod caching {
 
         // ------ ACT ------
 
-        send_request().await;  // This request should be loaded from the origin.
+        send_request().await; // This request should be loaded from the origin.
         send_request().await;
 
-        // Jump in time: +6 min. Jump has to be longer than `max-age` in the request header.       
-        set_now_getter(|| Utc::now().timestamp() + (6 * 60)); 
+        // Jump in time: +6 min. Jump has to be longer than `max-age` in the request header.
+        set_now_getter(|| Utc::now().timestamp() + (6 * 60));
 
         send_request().await; // This request should be loaded from the origin.
         send_request().await;
         send_request().await;
 
         // ------ ASSERT ------
-        
+
         // 3 requests should be loaded from cache, 2 from the origin.
         assert_eq!(resource.request_count(), 2);
     }
@@ -122,15 +120,14 @@ mod caching {
 
         let mock_server = start_mock_server();
         let resource = mock_server.create_resource("/catalog/movie/top.json");
-        resource
-            .body(include_str!("../test_data/top.json"));
+        resource.body(include_str!("../test_data/top.json"));
 
         let path = "/origin/catalog/movie/top.json";
         let send_request = || async { client.get(url_from_path(path)).await.unwrap() };
 
         // ------ ACT ------
 
-        assert_eq!(send_request().await.status(), StatusCode::OK);  // This request should be loaded from the origin.
+        assert_eq!(send_request().await.status(), StatusCode::OK); // This request should be loaded from the origin.
         assert_eq!(send_request().await.status(), StatusCode::OK);
 
         // Kill `mock_server` to simulate addon fail.
@@ -139,13 +136,19 @@ mod caching {
         assert_eq!(send_request().await.status(), StatusCode::OK);
         assert_eq!(send_request().await.status(), StatusCode::OK);
 
-        // Jump in time: +49 h. Jump has to be longer than `cache_stale_threshold_on_fail` in proxy config.      
-        set_now_getter(|| Utc::now().timestamp() + (49 * 60 * 60)); 
+        // Jump in time: +49 h. Jump has to be longer than `cache_stale_threshold_on_fail` in proxy config.
+        set_now_getter(|| Utc::now().timestamp() + (49 * 60 * 60));
 
         // ------ ASSERT ------
-        
-        assert_eq!(send_request().await.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(send_request().await.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        assert_eq!(
+            send_request().await.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            send_request().await.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     // ------ SETUP HELPERS ------
@@ -197,6 +200,9 @@ mod caching {
     }
 
     async fn clear_cache() {
-        Client::new().get(url_from_path("/clear-cache")).await.unwrap();
+        Client::new()
+            .get(url_from_path("/clear-cache"))
+            .await
+            .unwrap();
     }
 }
