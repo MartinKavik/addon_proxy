@@ -47,6 +47,9 @@ before the push.
   - `cargo make clippy`
   - `cargo make test` or `cargo test`
 
+- Tested with:
+  - `rustc 1.44.1 (c7087fe00 2020-06-17)`
+  - `rustc 1.46.0-nightly (feb3536eb 2020-06-09)`
  
 ## How it works
 
